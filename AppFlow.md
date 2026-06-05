@@ -1,4 +1,4 @@
-# Application Flow Document
+# App Flow Document
 
 ## Project Name
 
@@ -6,214 +6,183 @@ DevSync
 
 ## Overview
 
-This document describes how users interact with DevSync and how application modules connect throughout the user journey.
-
-The primary goal of the application is to provide a centralized repository workspace where collaborators can create, manage, and edit project resources in real time.
-
-The flow defined below represents the expected behavior of the system from user authentication to repository collaboration and project export.
+DevSync follows a repository-based workflow where users can create repositories, invite collaborators, and work together on project files in real time. The application is designed to ensure that all collaborators always have access to the latest version of the project without manually sharing files or performing synchronization operations.
 
 ---
 
-# 1. Entry Point
+## User Authentication Flow
 
-Users access the application through the authentication interface.
+A new user creates an account using their email and password.
 
-New users are required to create an account before accessing platform resources.
+After successful registration, the user can log in to the platform. Once authenticated, a JWT token is issued and the user is redirected to the dashboard.
 
-Existing users can authenticate using their registered credentials.
-
-Upon successful authentication, the user session is established and access is granted to the dashboard.
+Unauthenticated users cannot access repository resources or workspace routes.
 
 ---
 
-# 2. Dashboard Flow
+## Dashboard Flow
 
-The dashboard serves as the primary navigation hub of the application.
+After login, the user lands on the dashboard.
 
-After login, users are presented with repositories that they own or repositories where they have been added as collaborators.
+The dashboard displays:
 
-From the dashboard, users can:
+* Repositories owned by the user
+* Repositories shared with the user
+* Recent repositories
+
+From the dashboard, the user can:
 
 * Create a new repository
 * Open an existing repository
-* View repository details
-* Access recently modified repositories
-
-Repository creation is initiated directly from the dashboard and redirects the user to the newly created workspace.
+* Delete a repository (if owner)
 
 ---
 
-# 3. Repository Creation Flow
+## Repository Creation Flow
 
-When creating a repository, the user provides the required repository information such as repository name and visibility settings.
+The user selects the "Create Repository" option and provides a repository name.
 
-After successful creation:
+Once created:
 
-* A repository record is generated.
-* Ownership is assigned to the creator.
-* Repository metadata is stored in the database.
-* The repository becomes available within the user's dashboard.
+* A repository record is stored in the database.
+* The current user becomes the repository owner.
+* The repository is added to the user's dashboard.
 
 The user is then redirected to the repository workspace.
 
 ---
 
-# 4. Repository Workspace Flow
+## Collaborator Management Flow
 
-The repository workspace is the core area of the application.
+Repository owners can invite collaborators using their registered email address.
+
+When an invitation is accepted:
+
+* The collaborator is added to the repository.
+* Repository access permissions are granted.
+* The repository becomes visible in the collaborator's dashboard.
+
+All repository members can access the same workspace.
+
+---
+
+## Workspace Flow
 
 When a repository is opened, the system loads:
-
-* Repository metadata
-* File structure
-* Folder hierarchy
-* Collaborator information
-
-A real-time connection is established between the client and server to enable live collaboration features.
-
-All repository members accessing the workspace are connected to the same collaboration session.
-
----
-
-# 5. File Management Flow
-
-Within the repository workspace, users can manage project resources.
-
-Supported operations include:
-
-* Creating files
-* Creating folders
-* Renaming files
-* Renaming folders
-* Deleting files
-* Deleting folders
-
-Whenever a file system operation occurs, the system updates the database and broadcasts the change to active collaborators.
-
-All connected users receive the updated repository structure without requiring a page refresh.
-
----
-
-# 6. Code Collaboration Flow
-
-Users can open any file available within the repository and edit its contents.
-
-When code changes occur:
-
-* Changes are captured by the editor.
-* Updates are transmitted to the collaboration server.
-* The server distributes the changes to connected collaborators.
-* Active collaborators receive the update immediately.
-
-This process ensures that all participants work with the latest version of the repository.
-
----
-
-# 7. Collaborator Management Flow
-
-Repository owners can manage repository access.
-
-Owners can:
-
-* Invite collaborators
-* Remove collaborators
-* View repository members
-
-Invited users receive repository access and can interact with repository resources according to their assigned permissions.
-
-Once access is granted, the repository becomes available from the collaborator's dashboard.
-
----
-
-# 8. Presence Tracking Flow
-
-The system maintains awareness of active repository members.
-
-When a collaborator enters a repository workspace:
-
-* The user is marked as active.
-* The active members list is updated.
-
-When a collaborator disconnects or leaves the workspace:
-
-* The active status is removed.
-* Repository presence information is refreshed.
-
-This allows collaborators to identify who is currently participating in the workspace.
-
----
-
-# 9. Repository Persistence Flow
-
-All repository-related data is stored persistently.
-
-This includes:
 
 * Repository information
 * File structure
 * Folder hierarchy
-* File contents
-* Collaborator information
+* Collaborator details
 
-Changes are automatically saved during repository activity.
+A Socket.IO connection is established to enable real-time synchronization between active collaborators.
 
-Users can leave the platform and return later without losing repository state.
+Each connected user joins the repository workspace channel.
 
 ---
 
-# 10. Repository Export Flow
+## File Management Flow
 
-Repository owners and authorized collaborators can export repository contents.
+Inside the workspace, users can:
+
+* Create files
+* Create folders
+* Rename files
+* Rename folders
+* Delete files
+* Delete folders
+
+Whenever a file operation occurs:
+
+1. The action is saved to the database.
+2. The update is emitted through Socket.IO.
+3. Connected collaborators receive the update instantly.
+4. Their workspace is updated without requiring a refresh.
+
+---
+
+## Code Editing Flow
+
+Users can open any file from the repository and start editing.
+
+When a code change occurs:
+
+1. The editor captures the modification.
+2. The update is sent to the server through Socket.IO.
+3. The server broadcasts the change to other connected collaborators.
+4. Collaborators receive and apply the update immediately.
+
+This allows multiple users to work on the same project simultaneously.
+
+---
+
+## Online Presence Flow
+
+When a user enters a repository workspace:
+
+* Their status is marked as active.
+* Other collaborators can see that the user is online.
+
+When a user leaves the workspace or disconnects:
+
+* Their online status is removed.
+* The active members list is updated.
+
+---
+
+## Repository Persistence Flow
+
+All repository data is stored in MongoDB.
+
+Changes made to:
+
+* Files
+* Folders
+* Repository structure
+* Repository metadata
+
+are persisted automatically.
+
+When a user returns to the repository later, the latest saved state is restored.
+
+---
+
+## Export Flow
+
+Repository owners and authorized collaborators can export the repository.
 
 During export:
 
-* Repository resources are collected.
-* Folder structure is preserved.
-* A ZIP archive is generated.
-* The archive is delivered to the user for download.
+1. The system collects all repository files and folders.
+2. A ZIP archive is generated.
+3. The archive is downloaded to the user's local machine.
 
-The exported project can then be opened and executed locally using a preferred development environment.
-
----
-
-# 11. Application Navigation Structure
-
-The application follows the navigation sequence below:
-
-Authentication
-
-↓
-
-Dashboard
-
-↓
-
-Repository Selection / Repository Creation
-
-↓
-
-Repository Workspace
-
-↓
-
-File Management & Collaboration
-
-↓
-
-Repository Export
-
-↓
-
-Local Development Environment
+The exported repository can then be opened and executed locally using development environments such as VS Code.
 
 ---
 
-# 12. Expected User Workflow
+## High-Level Application Flow
 
-A typical workflow begins when a user creates a repository and invites collaborators.
+User Authentication
 
-Collaborators join the repository workspace and begin working on project resources. File operations and code modifications are synchronized automatically between connected members.
+→ Dashboard
 
-Repository data remains persisted throughout the development process and can be exported when local execution or deployment is required.
+→ Repository Creation / Repository Selection
 
-The application is designed to ensure that all collaborators interact with a single shared project state rather than maintaining separate local copies of the same repository.
+→ Repository Workspace
+
+→ File & Folder Management
+
+→ Real-Time Collaboration
+
+→ Automatic Persistence
+
+→ Repository Export
+
+→ Local Development & Execution
+
+---
+
+## Expected User Experience
+
+A user should be able to create a repository, invite collaborators, edit project files in real time, and export the completed project without relying on ZIP sharing, repeated file transfers, or continuous manual synchronization.
