@@ -4,139 +4,184 @@
 
 DevSync
 
-## Product Type
+## Product Category
 
 Real-Time Collaborative Repository Workspace
 
 ---
 
-## Product Overview
+# 1. Introduction
 
-DevSync is a web-based platform that combines repository management and real-time collaboration into a single workspace.
+Modern software development is highly collaborative. Whether it is a college project, a hackathon submission, or a small team-based application, multiple developers are often required to work on the same codebase.
 
-The platform allows users to create repositories, invite collaborators, manage project files, and work together on the same codebase in real time.
+While version control systems provide a reliable way to manage source code, they are not designed for real-time collaboration. Team members frequently rely on file sharing, repeated synchronization, and external communication tools to coordinate development activities.
 
-Unlike traditional repository platforms where team members need to repeatedly push, pull, or exchange project files, DevSync keeps all collaborators synchronized through a shared live workspace.
-
----
-
-## Problem Statement
-
-In team projects, developers often face synchronization issues because project files are stored locally on individual systems.
-
-Common challenges include:
-
-* Sharing ZIP files after every update.
-* Repeated Git push and pull operations.
-* Multiple project versions across team members.
-* Delays in collaboration and communication.
-* Difficulty tracking the latest project state.
-
-As a result, teams spend time managing files instead of developing software.
+DevSync aims to simplify this workflow by providing a shared repository workspace where collaborators can work on the same project simultaneously and view changes as they happen.
 
 ---
 
-## Proposed Solution
+# 2. Problem Statement
 
-DevSync provides a centralized repository workspace where multiple collaborators can access and modify the same project simultaneously.
+Students and beginner development teams often encounter challenges while working on shared projects.
 
-Any changes made by one collaborator are instantly reflected for all connected members, including:
+In many cases, project files are distributed across multiple local systems, resulting in:
 
-* File creation
-* File deletion
-* File renaming
-* Folder management
-* Code editing
+* Duplicate project versions
+* Manual file sharing
+* Frequent synchronization efforts
+* Delayed visibility of changes
+* Increased coordination overhead
 
-This ensures that every team member always works on the latest version of the project.
+Although platforms such as GitHub help manage source code, contributors must still commit, push, and pull changes before updates become available to other team members.
 
-Projects can be exported as ZIP files and executed locally using development tools such as VS Code.
-
----
-
-## Target Users
-
-* College Students
-* Hackathon Teams
-* Beginner Developers
-* Small Development Teams
+For small teams and academic projects, this workflow can become inefficient and difficult to manage.
 
 ---
 
-## Core Features
+# 3. Product Vision
+
+The vision of DevSync is to create a collaborative development environment where a project exists as a shared live workspace rather than a collection of isolated local copies.
+
+Every collaborator should be able to:
+
+* Access the same repository
+* View project structure in real time
+* Edit files simultaneously
+* Stay synchronized automatically
+* Work without manually exchanging project files
+
+The platform should provide a single source of truth for the entire project.
+
+---
+
+# 4. Proposed Solution
+
+DevSync provides a repository-based workspace where all project files are stored centrally and synchronized across connected collaborators.
+
+Whenever a user performs an action such as creating a file, deleting a folder, or modifying code, the update is immediately reflected in the workspace of other active collaborators.
+
+Instead of sharing project archives or repeatedly synchronizing repositories, team members interact with the same live project environment.
+
+Completed repositories can be exported and executed locally using any preferred development environment.
+
+---
+
+# 5. Target Users
+
+The platform is primarily designed for:
+
+### College Students
+
+Students working on academic projects, assignments, and final-year development work.
+
+### Hackathon Teams
+
+Teams that require rapid collaboration during limited development timelines.
+
+### Beginner Developers
+
+Developers who are learning collaborative software development practices.
+
+### Small Development Teams
+
+Teams looking for lightweight real-time collaboration without complex setup processes.
+
+---
+
+# 6. Product Objectives
+
+The primary objectives of the platform are:
+
+* Reduce dependency on manual project sharing.
+* Eliminate project synchronization issues.
+* Improve visibility of ongoing development activities.
+* Provide a centralized workspace for project collaboration.
+* Simplify team-based software development.
+
+---
+
+# 7. Core Functionalities
+
+The initial version of DevSync will provide the following capabilities:
 
 ### Repository Management
 
-* Create Repository
-* Delete Repository
-* Open Repository
-* View Repository List
+Users can create, access, and manage repositories from a centralized dashboard.
 
 ### Collaborator Management
 
-* Invite Members
-* Remove Members
-* View Collaborators
+Repository owners can invite team members and manage repository access.
 
-### File System
+### File and Folder Management
 
-* Create Files
-* Create Folders
-* Rename Files
-* Delete Files
-* Delete Folders
+Users can create, organize, rename, and remove project resources within the repository workspace.
 
 ### Real-Time Collaboration
 
-* Real-Time Code Editing
-* Real-Time File Synchronisation
-* Real-Time Folder Synchronisation
-
-### Workspace Presence
-
-* View Active Members
-* View Online Collaborators
+All repository updates, including file operations and code modifications, are synchronized instantly among active collaborators.
 
 ### Repository Persistence
 
-* Automatic Saving
-* Reopen Repository Anytime
+All repository data is stored and maintained between sessions.
 
-### Project Export
+### Repository Export
 
-* Export Repository as ZIP
-* Open and Run Locally
+Repositories can be downloaded as ZIP archives for local development and execution.
 
 ---
 
-## Product Goals
+# 8. Product Scope
 
-* Eliminate manual project sharing.
-* Reduce dependency on repeated push and pull operations.
-* Improve team collaboration.
-* Maintain a single source of truth for project files.
-* Provide a live repository workspace for development teams.
+The scope of the initial release is focused on repository collaboration and synchronization.
+
+Included in scope:
+
+* User authentication
+* Repository management
+* Collaborator management
+* File management
+* Folder management
+* Real-time synchronization
+* Repository export
+
+Excluded from scope:
+
+* Built-in code execution
+* Version control history
+* AI-powered assistance
+* Project analytics
+
+These features may be introduced in future releases.
 
 ---
 
-## Success Criteria
+# 9. Success Metrics
 
-The project will be considered successful if:
+The project will be considered successful if users are able to:
 
-* Multiple users can work inside the same repository.
-* All file operations are synchronized in real time.
-* Code changes are visible instantly to collaborators.
-* Repository data persists across sessions.
-* Projects can be exported successfully.
-* Teams can collaborate without exchanging ZIP files.
+* Collaborate within the same repository simultaneously.
+* Observe updates without manual synchronization.
+* Maintain a consistent repository state across collaborators.
+* Export projects successfully for local execution.
+* Complete collaborative development workflows without relying on file sharing.
 
 ---
 
-## Future Scope
+# 10. Future Direction
 
-* Activity Logs
-* Version History
-* Built-In Code Execution
-* AI Assistant
-* AI Code Review
-* Repository Analytics
+The platform architecture should support future enhancements such as:
+
+* Activity Tracking
+* Repository History
+* Snapshot Management
+* Built-In Project Execution
+* AI-Assisted Development Tools
+* Intelligent Code Review
+
+These capabilities are considered long-term extensions and are not part of the initial product release.
+
+---
+
+# Product Summary
+
+DevSync is a real-time collaborative repository workspace designed to simplify team-based software development. By combining repository management with live synchronization, the platform enables multiple developers to work on the same project without manual file sharing, repetitive synchronization processes, or fragmented project states.
