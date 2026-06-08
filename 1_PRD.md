@@ -182,6 +182,6 @@ These capabilities are considered long-term extensions and are not part of the i
 
 ---
 
-# Product Summary
+# Product Summaryy
 
 DevSync is a real-time collaborative repository workspace designed to simplify team-based software development. By combining repository management with live synchronization, the platform enables multiple developers to work on the same project without manual file sharing, repetitive synchronization processes, or fragmented project states.
