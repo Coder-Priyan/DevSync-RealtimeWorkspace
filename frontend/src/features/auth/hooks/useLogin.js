@@ -1,53 +1,34 @@
-/**
- * features/auth/hooks/useLogin.js
- *
- * Fix: removed the @/store/AuthContext import that was breaking the module.
- * The project's AuthContext lives at src/context/AuthContext.jsx with an
- * unknown export shape, so this hook manages token storage directly and
- * reads the context path from wherever the project actually has it.
- *
- * If your AuthContext exports { useAuth } with a login(token, user) method,
- * swap the STORAGE block below for:
- *   import { useAuth } from '@/context/AuthContext'
- *   const { login } = useAuth()
- * and replace the manual localStorage calls with login(data.token, data.user).
- */
-
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@/context/AuthContext'
 import { login as loginService } from '@/services/auth.service'
 import { ROUTES } from '@/constants/routes'
 
-// ─── Validation ───────────────────────────────────────────────────────────────
 const validate = ({ email, password }) => {
   const errors = {}
-
   if (!email.trim()) {
     errors.email = 'Email is required.'
   } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errors.email = 'Enter a valid email address.'
   }
-
   if (!password) {
     errors.password = 'Password is required.'
   } else if (password.length < 6) {
     errors.password = 'Password must be at least 6 characters.'
   }
-
   return errors
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useLogin() {
-  const navigate = useNavigate()
+  const { login } = useAuth()
+  const navigate  = useNavigate()
 
-  const [fields, setFields] = useState({ email: '', password: '' })
-  const [fieldErrors, setFieldErrors] = useState({})
-  const [formError, setFormError] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+  const [fields,       setFields]       = useState({ email: '', password: '' })
+  const [fieldErrors,  setFieldErrors]  = useState({})
+  const [formError,    setFormError]    = useState('')
+  const [isLoading,    setIsLoading]    = useState(false)
   const [showPassword, setShowPassword] = useState(false)
 
-  // ── handleChange ──────────────────────────────────────────────────────────
   const handleChange = useCallback((e) => {
     const { name, value } = e.target
     setFields((prev) => ({ ...prev, [name]: value }))
@@ -55,7 +36,6 @@ export function useLogin() {
     if (formError) setFormError('')
   }, [fieldErrors, formError])
 
-  // ── handleSubmit ──────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault()
 
@@ -75,11 +55,9 @@ export function useLogin() {
         password: fields.password,
       })
 
-      // Store token and user directly — no AuthContext dependency.
-      // When you wire up your AuthContext, replace these two lines with
-      // whichever method your context exposes, e.g. login(data.token, data.user).
-      localStorage.setItem('devsync_token', data.token)
-      localStorage.setItem('devsync_user', JSON.stringify(data.user))
+      // login() does both: updates React state (isAuthenticated → true)
+      // AND saves to localStorage. navigate() then works correctly.
+      login(data.token, data.user)
 
       navigate(ROUTES.DEFAULT_AUTHENTICATED, { replace: true })
 
@@ -99,9 +77,8 @@ export function useLogin() {
     } finally {
       setIsLoading(false)
     }
-  }, [fields, navigate])
+  }, [fields, login, navigate])
 
-  // ── toggleShowPassword ────────────────────────────────────────────────────
   const toggleShowPassword = useCallback(() => {
     setShowPassword((prev) => !prev)
   }, [])
