@@ -114,8 +114,12 @@ export const buildFileTree = (folders = [], files = []) => {
   folders.forEach((folder) => {
     const node = folderMap[folder._id]
 
-    const parentId = folder.parentFolderId ?? folder.parentFolder ?? null
-
+    const parentId =
+      folder.parentFolderId ??
+      folder.parentFolder?._id ??
+      folder.parentFolder ??
+      null
+      
     if (parentId && folderMap[parentId]) {
       folderMap[parentId].children.push(node)
   } else {
