@@ -1,15 +1,10 @@
-// features/workspace/hooks/usePresence.js
-// Stage 5 — mock presence data only. Real Socket.IO wiring in Stage 7.
+// frontend/src/features/workspace/hooks/usePresence.js
+// Milestone 3: no longer returns mock data.
+// WorkspacePage passes onlineUsers from useSocket directly.
+// This hook is now a thin pass-through kept for architectural consistency —
+// Phase 4 will extend it with activeFile tracking per user.
 
-import { useState } from 'react'
-
-const MOCK_PRESENCE = [
-  { userId: 'u1', username: 'Priiyan', activeFile: 'App.jsx',   color: '#58A6FF' },
-  { userId: 'u2', username: 'Riya',    activeFile: 'main.jsx',  color: '#3FB950' },
-  { userId: 'u3', username: 'Kunal',   activeFile: null,        color: '#E3B341' },
-]
-
-export function usePresence() {
-  const [onlineUsers] = useState(MOCK_PRESENCE)
+export function usePresence(onlineUsers = []) {
+  // Phase 4: derive per-user activeFile from onlineUsers here
   return { onlineUsers }
 }

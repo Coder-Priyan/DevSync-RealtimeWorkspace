@@ -12,7 +12,6 @@ import { useWorkspace }  from '@/features/workspace/hooks/useWorkspace'
 import { useFileTree }   from '@/features/workspace/hooks/useFileTree'
 import { useTabs }       from '@/features/workspace/hooks/useTabs'
 import { useEditor }     from '@/features/workspace/hooks/useEditor'
-import { usePresence }   from '@/features/workspace/hooks/usePresence'
 
 import { WorkspaceNavbar }   from '@/features/workspace/components/Toolbar/WorkspaceNavbar'
 import { FileTree }          from '@/features/workspace/components/FileExplorer/FileTree'
@@ -88,7 +87,6 @@ function WorkspacePage() {
   const { repoId } = useParams()
 
   const { repo }       = useWorkspace(repoId)
-  const { onlineUsers } = usePresence()
 
   const {
     tree, isLoading: treeLoading, error: treeError,
@@ -144,7 +142,9 @@ function WorkspacePage() {
 
   const activeFile = tabs.find((t) => t._id === activeTab) ?? null
 
-  const { isConnected } = useSocket(repoId)
+  const { isConnected, onlineUsers } = useSocket(repoId)
+
+  console.log("🔥 ONLINE USERS:", onlineUsers)
 
   return (
     <div style={{

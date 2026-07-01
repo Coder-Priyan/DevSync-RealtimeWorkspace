@@ -1,10 +1,14 @@
-// features/workspace/components/CollabPane/PresenceList.jsx
+// frontend/src/features/workspace/components/CollabPane/PresenceList.jsx
+// Milestone 3: receives live onlineUsers from socket — mock removed.
+// Shape of each user: { userId, username, socketId, joinedAt }
 
 import { UserPresenceRow } from './UserPresenceRow'
+import { getCollabColorHex } from '@/utils/generateColor'
 
-export function PresenceList({ onlineUsers }) {
+export function PresenceList({ onlineUsers = [] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
+
       {/* Section header */}
       <div style={{
         padding: '10px 12px 6px',
@@ -15,10 +19,30 @@ export function PresenceList({ onlineUsers }) {
         Live — {onlineUsers.length}
       </div>
 
-      {/* Users */}
-      {onlineUsers.map((u) => (
-        <UserPresenceRow key={u.userId} user={u} />
+      {/* Empty state */}
+      {onlineUsers.length === 0 && (
+        <div style={{
+          padding: '8px 12px',
+          fontSize: '11px',
+          color: '#484F58',
+        }}>
+          No one else is here yet.
+        </div>
+      )}
+
+      {/* Online users */}
+      {onlineUsers.map((user) => (
+        <UserPresenceRow
+          key={user.socketId}
+          user={{
+            userId:     user.userId,
+            username:   user.username,
+            activeFile: user.activeFile ?? null, // Phase 4 populates this
+            color:      getCollabColorHex(user.userId),
+          }}
+        />
       ))}
+
     </div>
   )
 }

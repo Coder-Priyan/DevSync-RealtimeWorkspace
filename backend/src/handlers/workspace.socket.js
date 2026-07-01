@@ -1,59 +1,58 @@
 // backend/src/handlers/workspace.socket.js
+// Milestone 3 change: calls presence callbacks after join/leave/disconnect.
+// Room logic is unchanged. Presence logic stays in presence.socket.js.
 
-const { EVENTS }     = require('../sockets/events')
-const Repository     = require('../models/Repository')
+const { EVENTS }                  = require('../sockets/events')
+const Repository                  = require('../models/Repository')
+const { registerPresenceHandlers } = require('./presence.socket')
 
-// ── Room name helper ──────────────────────────────────────────────────────────
-// Keeps the room naming convention in one place.
-// Every reference to a repo room goes through this function.
 const repoRoom = (repositoryId) => `repo:${repositoryId}`
 
-// ── handleConnection ──────────────────────────────────────────────────────────
 const handleConnection = (io, socket) => {
   const { _id, username } = socket.user
 
   console.log(`[Socket] Connected   | user: ${username} (${_id}) | socketId: ${socket.id}`)
 
-  // ── WORKSPACE_JOIN ──────────────────────────────────────────────────────────
+  // ── Register presence handler — attaches socket.presenceCallbacks ─────────
+  registerPresenceHandlers(io, socket)
+
+  // ── WORKSPACE_JOIN ────────────────────────────────────────────────────────
   socket.on(EVENTS.WORKSPACE_JOIN, async ({ repositoryId } = {}) => {
     try {
-      // 1. Validate payload
       if (!repositoryId) {
         return socket.emit(EVENTS.ERROR, { message: 'repositoryId is required.' })
       }
 
-      // 2. Validate repository exists in DB
       const repository = await Repository.findById(repositoryId).lean()
       if (!repository) {
         return socket.emit(EVENTS.ERROR, { message: 'Repository not found.' })
       }
 
-      // 3. Leave previous room if the user is already in one.
-      //    A user should only be in one repository room at a time.
+      // Leave previous room if switching repositories
       const previousRoom = socket.data.currentRepository
       if (previousRoom && previousRoom !== repositoryId) {
         socket.leave(repoRoom(previousRoom))
-        console.log(
-          `[Socket] Left room   | user: ${username} | room: ${repoRoom(previousRoom)}`
-        )
+        // Notify presence manager about the leave
+        socket.presenceCallbacks?.onLeaveRoom(previousRoom)
+        console.log(`[Socket] Left room   | user: ${username} | room: ${repoRoom(previousRoom)}`)
       }
 
-      // 4. Join the new repository room
+      // Join new room
       socket.join(repoRoom(repositoryId))
-
-      // 5. Persist current room on socket.data so disconnect handler
-      //    and future handlers can read it without re-querying.
       socket.data.currentRepository = repositoryId
 
-      console.log(
-        `[Socket] Joined room | user: ${username} (${_id}) | room: ${repoRoom(repositoryId)}`
-      )
+      console.log(`[Socket] Joined room | user: ${username} (${_id}) | room: ${repoRoom(repositoryId)}`)
 
-      // 6. Acknowledge back to the client so it knows the join succeeded.
-      //    Payload will grow in Phase 2 (presence list, etc.)
+      // Notify presence manager — triggers broadcast to room
+      socket.presenceCallbacks?.onJoinRoom(repositoryId)
+
+      // Ack to the joining client
+      // Milestone 3: include current presence list in the ack so the
+      // joining user immediately sees who is already online
+      const { getPresenceList } = require('./presence.socket')
       socket.emit(EVENTS.WORKSPACE_JOINED, {
         repositoryId,
-        message: `Joined workspace ${repositoryId}`,
+        users: getPresenceList(repositoryId),
       })
 
     } catch (error) {
@@ -62,30 +61,24 @@ const handleConnection = (io, socket) => {
     }
   })
 
-  // ── WORKSPACE_LEAVE ─────────────────────────────────────────────────────────
+  // ── WORKSPACE_LEAVE ───────────────────────────────────────────────────────
   socket.on(EVENTS.WORKSPACE_LEAVE, ({ repositoryId } = {}) => {
     const roomToLeave = repositoryId || socket.data.currentRepository
-
     if (!roomToLeave) return
 
     socket.leave(repoRoom(roomToLeave))
 
-    // Clear stored room if it matches the one being left
     if (socket.data.currentRepository === roomToLeave) {
       socket.data.currentRepository = null
     }
 
-    console.log(
-      `[Socket] Left room   | user: ${username} (${_id}) | room: ${repoRoom(roomToLeave)}`
-    )
+    // Notify presence manager — triggers broadcast to room
+    socket.presenceCallbacks?.onLeaveRoom(roomToLeave)
 
-    // Phase 2: broadcast presence:update to room here
+    console.log(`[Socket] Left room   | user: ${username} (${_id}) | room: ${repoRoom(roomToLeave)}`)
   })
 
-  // ── DISCONNECT ──────────────────────────────────────────────────────────────
-  // Socket.IO automatically removes the socket from all rooms on disconnect,
-  // so no manual socket.leave() is needed here.
-  // We log it and clear socket.data for clarity.
+  // ── DISCONNECT ────────────────────────────────────────────────────────────
   socket.on('disconnect', (reason) => {
     const currentRoom = socket.data.currentRepository
 
@@ -94,13 +87,17 @@ const handleConnection = (io, socket) => {
       (currentRoom ? ` | was in: ${repoRoom(currentRoom)}` : '')
     )
 
+    // Socket.IO removes the socket from all rooms automatically on disconnect.
+    // We still need to clean up the presence store manually.
+    if (currentRoom) {
+      socket.presenceCallbacks?.onLeaveRoom(currentRoom)
+    }
+
     socket.data.currentRepository = null
 
-    // Phase 2: remove from presence map, broadcast presence:update
+    // Phase 4: clear activeFile from presence entry here
   })
 
-  // ── Future handler registrations ─────────────────────────────────────────
-  // Phase 2:  registerPresenceHandlers(io, socket)
   // Phase 3:  registerFileHandlers(io, socket)
   //           registerFolderHandlers(io, socket)
   // Phase 4:  registerEditorHandlers(io, socket)
