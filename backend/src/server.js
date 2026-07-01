@@ -4,14 +4,18 @@ const connectDB = require("./config/db");
 const express = require("express");
 const cors = require("cors");
 const fileRoutes = require("./routes/fileRoutes");
-
 const folderRoutes = require("./routes/folderRoutes");
+
+const http = require("http");
+const { initSocket } = require("./sockets");
 
 require("dotenv").config();
 
 connectDB();
 
 const app = express();
+const httpServer = http.createServer(app);
+
 
 app.use(cors());
 app.use(express.json());
@@ -29,8 +33,10 @@ app.use("/api/files", fileRoutes);
 
 app.use("/api/folders", folderRoutes);
 
+initSocket(httpServer);
+
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
