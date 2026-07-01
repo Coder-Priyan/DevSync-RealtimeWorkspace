@@ -3,9 +3,10 @@
 // useWorkspace fetches repo name. useFileTree fetches real files/folders.
 // useEditor fetches file content on open and auto-saves on change.
 
-import { useState, useCallback, useEffect } from 'react'
-import { connectSocket, disconnectSocket } from '@/lib/socket'
+import { useState, useCallback,} from 'react'
 import { useParams } from 'react-router-dom'
+
+import { useSocket } from '@/features/workspace/hooks/useSocket'
 
 import { useWorkspace }  from '@/features/workspace/hooks/useWorkspace'
 import { useFileTree }   from '@/features/workspace/hooks/useFileTree'
@@ -86,14 +87,6 @@ function RenameInput({ node, onConfirm, onCancel }) {
 function WorkspacePage() {
   const { repoId } = useParams()
 
-  useEffect(() => {
-    connectSocket()
-
-    return () => {
-      disconnectSocket()
-    }
-  }, [])
-
   const { repo }       = useWorkspace(repoId)
   const { onlineUsers } = usePresence()
 
@@ -151,6 +144,8 @@ function WorkspacePage() {
 
   const activeFile = tabs.find((t) => t._id === activeTab) ?? null
 
+  const { isConnected } = useSocket(repoId)
+
   return (
     <div style={{
       height: '100vh', maxHeight: '100vh',
@@ -162,7 +157,7 @@ function WorkspacePage() {
       <WorkspaceNavbar
         repoName={repo?.name ?? '…'}
         onlineUsers={onlineUsers}
-        syncStatus={syncStatus}
+        syncStatus={isConnected ? syncStatus : 'error'}
       />
 
       {/* ── Main body ─────────────────────────────────────────────────── */}

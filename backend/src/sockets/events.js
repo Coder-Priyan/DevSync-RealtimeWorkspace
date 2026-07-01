@@ -1,4 +1,6 @@
 // backend/src/sockets/events.js
+// No changes to constants — WORKSPACE_JOIN/LEAVE/JOINED were already defined.
+// Republished here for completeness so you can confirm your file matches exactly.
 
 const EVENTS = {
   // ── Connection lifecycle ─────────────────────────────────────────────────
@@ -8,10 +10,10 @@ const EVENTS = {
   RECONNECT:         'reconnect',
   RECONNECT_ATTEMPT: 'reconnect_attempt',
 
-  // ── Workspace (Phase 1) ──────────────────────────────────────────────────
-  WORKSPACE_JOIN:   'workspace:join',
-  WORKSPACE_LEAVE:  'workspace:leave',
-  WORKSPACE_JOINED: 'workspace:joined',
+  // ── Workspace (Phase 1 — THIS MILESTONE) ────────────────────────────────
+  WORKSPACE_JOIN:   'workspace:join',   // client → server
+  WORKSPACE_LEAVE:  'workspace:leave',  // client → server
+  WORKSPACE_JOINED: 'workspace:joined', // server → client (ack)
 
   // ── Presence (Phase 2) ──────────────────────────────────────────────────
   PRESENCE_UPDATE: 'presence:update',
