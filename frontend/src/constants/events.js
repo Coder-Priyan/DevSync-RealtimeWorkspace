@@ -14,24 +14,24 @@ export const EVENTS = {
   WORKSPACE_LEAVE:  'workspace:leave',
   WORKSPACE_JOINED: 'workspace:joined',
 
-  // ── Presence (Phase 2) ──────────────────────────────────────────────────
+  // ── Presence ─────────────────────────────────────────────────────────────
   PRESENCE_UPDATE: 'presence:update',
   PRESENCE_LIST:   'presence:list',
 
-  // ── File operations (Phase 3) ────────────────────────────────────────────
+  // ── File operations ───────────────────────────────────────────────────────
   FILE_CREATED: 'file:created',
   FILE_RENAMED: 'file:renamed',
   FILE_DELETED: 'file:deleted',
 
-  // ── Folder operations (Phase 3) ──────────────────────────────────────────
+  // ── Folder operations ─────────────────────────────────────────────────────
   FOLDER_CREATED: 'folder:created',
   FOLDER_RENAMED: 'folder:renamed',
   FOLDER_DELETED: 'folder:deleted',
 
-  // ── Editor (Phase 4) ─────────────────────────────────────────────────────
-  CODE_CHANGE: 'editor:code-change',
-  CURSOR_MOVE: 'editor:cursor-move',
-  FILE_OPENED: 'editor:file-opened',
+  // ── Editor (Phase 4) ──────────────────────────────────────────────────────
+  EDITOR_JOIN:   'editor:join',
+  EDITOR_CHANGE: 'editor:change',
+  EDITOR_UPDATE: 'editor:update',
 
   // ── System ───────────────────────────────────────────────────────────────
   ERROR: 'error',

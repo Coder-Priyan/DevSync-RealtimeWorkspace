@@ -1,10 +1,10 @@
 // backend/src/handlers/workspace.socket.js
-// Milestone 3 change: calls presence callbacks after join/leave/disconnect.
-// Room logic is unchanged. Presence logic stays in presence.socket.js.
+// Phase 4 change: registerEditorHandlers() is now called on each connection.
 
-const { EVENTS }                  = require('../sockets/events')
-const Repository                  = require('../models/Repository')
+const { EVENTS }                   = require('../sockets/events')
+const Repository                   = require('../models/Repository')
 const { registerPresenceHandlers } = require('./presence.socket')
+const { registerEditorHandlers }   = require('./editor.socket')
 
 const repoRoom = (repositoryId) => `repo:${repositoryId}`
 
@@ -13,8 +13,18 @@ const handleConnection = (io, socket) => {
 
   console.log(`[Socket] Connected   | user: ${username} (${_id}) | socketId: ${socket.id}`)
 
-  // ── Register presence handler — attaches socket.presenceCallbacks ─────────
+  // Register sub-handlers — each owns its own event listeners
   registerPresenceHandlers(io, socket)
+
+  console.log(
+    `[CP3] Calling registerEditorHandlers | user: ${username} | socketId: ${socket.id}`
+  )
+
+  registerEditorHandlers(io, socket)   // ← Phase 4: wires editor:join + editor:change
+
+  console.log(
+    `[CP3] registerEditorHandlers completed | socketId: ${socket.id}`
+  )
 
   // ── WORKSPACE_JOIN ────────────────────────────────────────────────────────
   socket.on(EVENTS.WORKSPACE_JOIN, async ({ repositoryId } = {}) => {
@@ -28,27 +38,20 @@ const handleConnection = (io, socket) => {
         return socket.emit(EVENTS.ERROR, { message: 'Repository not found.' })
       }
 
-      // Leave previous room if switching repositories
       const previousRoom = socket.data.currentRepository
       if (previousRoom && previousRoom !== repositoryId) {
         socket.leave(repoRoom(previousRoom))
-        // Notify presence manager about the leave
         socket.presenceCallbacks?.onLeaveRoom(previousRoom)
         console.log(`[Socket] Left room   | user: ${username} | room: ${repoRoom(previousRoom)}`)
       }
 
-      // Join new room
       socket.join(repoRoom(repositoryId))
       socket.data.currentRepository = repositoryId
 
       console.log(`[Socket] Joined room | user: ${username} (${_id}) | room: ${repoRoom(repositoryId)}`)
 
-      // Notify presence manager — triggers broadcast to room
       socket.presenceCallbacks?.onJoinRoom(repositoryId)
 
-      // Ack to the joining client
-      // Milestone 3: include current presence list in the ack so the
-      // joining user immediately sees who is already online
       const { getPresenceList } = require('./presence.socket')
       socket.emit(EVENTS.WORKSPACE_JOINED, {
         repositoryId,
@@ -72,7 +75,6 @@ const handleConnection = (io, socket) => {
       socket.data.currentRepository = null
     }
 
-    // Notify presence manager — triggers broadcast to room
     socket.presenceCallbacks?.onLeaveRoom(roomToLeave)
 
     console.log(`[Socket] Left room   | user: ${username} (${_id}) | room: ${repoRoom(roomToLeave)}`)
@@ -87,20 +89,13 @@ const handleConnection = (io, socket) => {
       (currentRoom ? ` | was in: ${repoRoom(currentRoom)}` : '')
     )
 
-    // Socket.IO removes the socket from all rooms automatically on disconnect.
-    // We still need to clean up the presence store manually.
     if (currentRoom) {
       socket.presenceCallbacks?.onLeaveRoom(currentRoom)
     }
 
     socket.data.currentRepository = null
-
-    // Phase 4: clear activeFile from presence entry here
+    socket.data.activeFile = null
   })
-
-  // Phase 3:  registerFileHandlers(io, socket)
-  //           registerFolderHandlers(io, socket)
-  // Phase 4:  registerEditorHandlers(io, socket)
 }
 
 module.exports = { handleConnection, repoRoom }

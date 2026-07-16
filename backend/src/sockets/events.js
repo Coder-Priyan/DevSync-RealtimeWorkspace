@@ -1,6 +1,5 @@
 // backend/src/sockets/events.js
-// No changes to constants — WORKSPACE_JOIN/LEAVE/JOINED were already defined.
-// Republished here for completeness so you can confirm your file matches exactly.
+// Phase 4: EDITOR_JOIN, EDITOR_CHANGE, EDITOR_UPDATE added.
 
 const EVENTS = {
   // ── Connection lifecycle ─────────────────────────────────────────────────
@@ -10,29 +9,32 @@ const EVENTS = {
   RECONNECT:         'reconnect',
   RECONNECT_ATTEMPT: 'reconnect_attempt',
 
-  // ── Workspace (Phase 1 — THIS MILESTONE) ────────────────────────────────
-  WORKSPACE_JOIN:   'workspace:join',   // client → server
-  WORKSPACE_LEAVE:  'workspace:leave',  // client → server
-  WORKSPACE_JOINED: 'workspace:joined', // server → client (ack)
+  // ── Workspace ────────────────────────────────────────────────────────────
+  WORKSPACE_JOIN:   'workspace:join',
+  WORKSPACE_LEAVE:  'workspace:leave',
+  WORKSPACE_JOINED: 'workspace:joined',
 
-  // ── Presence (Phase 2) ──────────────────────────────────────────────────
+  // ── Presence ─────────────────────────────────────────────────────────────
   PRESENCE_UPDATE: 'presence:update',
   PRESENCE_LIST:   'presence:list',
 
-  // ── File operations (Phase 3) ────────────────────────────────────────────
+  // ── File operations ───────────────────────────────────────────────────────
   FILE_CREATED: 'file:created',
   FILE_RENAMED: 'file:renamed',
   FILE_DELETED: 'file:deleted',
 
-  // ── Folder operations (Phase 3) ──────────────────────────────────────────
+  // ── Folder operations ─────────────────────────────────────────────────────
   FOLDER_CREATED: 'folder:created',
   FOLDER_RENAMED: 'folder:renamed',
   FOLDER_DELETED: 'folder:deleted',
 
-  // ── Editor (Phase 4) ─────────────────────────────────────────────────────
-  CODE_CHANGE: 'editor:code-change',
-  CURSOR_MOVE: 'editor:cursor-move',
-  FILE_OPENED: 'editor:file-opened',
+  // ── Editor (Phase 4) ──────────────────────────────────────────────────────
+  // client → server: user opened a file in the editor
+  EDITOR_JOIN: 'editor:join',
+  // client → server: user typed — content changed
+  EDITOR_CHANGE: 'editor:change',
+  // server → other clients: propagate the change (never sent back to sender)
+  EDITOR_UPDATE: 'editor:update',
 
   // ── System ───────────────────────────────────────────────────────────────
   ERROR: 'error',

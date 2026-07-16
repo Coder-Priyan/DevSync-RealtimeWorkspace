@@ -1,13 +1,15 @@
-// pages/WorkspacePage.jsx
-// Stage 6 — real API wired. Mock data removed.
-// useWorkspace fetches repo name. useFileTree fetches real files/folders.
-// useEditor fetches file content on open and auto-saves on change.
+// frontend/src/pages/WorkspacePage.jsx
+//
+// Phase 4 changes vs previous version:
+//   1. useSocket moved BEFORE useEditor in hook call order
+//   2. socket destructured from useSocket
+//   3. socket passed into useEditor(repoId, socket)
+//   4. useEffect wires setRemoteUpdateCallback with activeTab
 
-import { useState, useCallback,} from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { useSocket } from '@/features/workspace/hooks/useSocket'
-
+import { useSocket }     from '@/features/workspace/hooks/useSocket'
 import { useWorkspace }  from '@/features/workspace/hooks/useWorkspace'
 import { useFileTree }   from '@/features/workspace/hooks/useFileTree'
 import { useTabs }       from '@/features/workspace/hooks/useTabs'
@@ -22,8 +24,6 @@ import { EditorPlaceHolder } from '@/features/workspace/components/Editor/Editor
 import { PresenceList }      from '@/features/workspace/components/CollabPane/PresenceList'
 import { InviteForm }        from '@/features/workspace/components/CollabPane/InviteForm'
 
-// ── New File / New Folder inline input ────────────────────────────────────────
-// Appears at the bottom of the file explorer when creating a new item.
 function NewItemInput({ placeholder, onConfirm, onCancel }) {
   const [value, setValue] = useState('')
   const inputRef = useCallback((el) => el?.focus(), [])
@@ -56,7 +56,6 @@ function NewItemInput({ placeholder, onConfirm, onCancel }) {
   )
 }
 
-// ── Rename inline input ────────────────────────────────────────────────────────
 function RenameInput({ node, onConfirm, onCancel }) {
   const [value, setValue] = useState(node.name)
   const inputRef = useCallback((el) => { if (el) { el.focus(); el.select() } }, [])
@@ -82,11 +81,10 @@ function RenameInput({ node, onConfirm, onCancel }) {
   )
 }
 
-// ── WorkspacePage ─────────────────────────────────────────────────────────────
 function WorkspacePage() {
   const { repoId } = useParams()
 
-  const { repo }       = useWorkspace(repoId)
+  const { repo } = useWorkspace(repoId)
 
   const {
     tree, isLoading: treeLoading, error: treeError,
@@ -101,30 +99,49 @@ function WorkspacePage() {
 
   const { tabs, activeTab, openTab, closeTab, switchTab } = useTabs()
 
-  const { getContent, setContent, loadFile, isFileLoading, syncStatus } = useEditor(repoId)
+  // ── useSocket BEFORE useEditor ────────────────────────────────────────────
+  // Critical ordering: useSocket creates the socket and returns it in state.
+  // useEditor receives it as a parameter so its EDITOR_UPDATE listener
+  // registers on the real socket, not on null.
+  const { isConnected, onlineUsers, socket } = useSocket(repoId, reloadTree)
 
-  // ── New item state (inline input at bottom of explorer) ───────────────────
-  const [newItem, setNewItem] = useState(null) // { type: 'file'|'folder', parentId }
+  // ── useEditor receives socket as param ────────────────────────────────────
+  const {
+    getContent,
+    setContent,
+    loadFile,
+    isFileLoading,
+    syncStatus,
+    ignoreRemoteChange,
+    setEditorRef,
+    applyRemoteUpdate,
+    setRemoteUpdateCallback,
+  } = useEditor(repoId, socket)
 
-  // ── File click — open tab + load content ──────────────────────────────────
+  const [newItem, setNewItem] = useState(null)
+
+  // ── Wire remote update callback ───────────────────────────────────────────
+  // useEditor doesn't know activeTab — WorkspacePage does.
+  // This callback is called by useEditor when EDITOR_UPDATE arrives.
+  useEffect(() => {
+    setRemoteUpdateCallback((fileId, content) => {
+      console.log("[Workspace] Remote callback", {
+        incomingFile: fileId,
+        activeTab,
+      })
+      applyRemoteUpdate(fileId, content, activeTab)
+    })
+  }, [setRemoteUpdateCallback, applyRemoteUpdate, activeTab])
+
   const handleFileClick = useCallback((file) => {
     selectFile(file._id)
     openTab(file)
     loadFile(file)
   }, [selectFile, openTab, loadFile])
 
-  // ── Context menu action handlers ──────────────────────────────────────────
-  const handleContextCreateFile = (parentId) => {
-    setNewItem({ type: 'file', parentId })
-  }
-
-  const handleContextCreateFolder = (parentId) => {
-    setNewItem({ type: 'folder', parentId })
-  }
-
-  const handleContextRename = (node) => {
-    setRenamingNode(node)
-  }
+  const handleContextCreateFile   = (parentId) => setNewItem({ type: 'file',   parentId })
+  const handleContextCreateFolder = (parentId) => setNewItem({ type: 'folder', parentId })
+  const handleContextRename       = (node)     => setRenamingNode(node)
 
   const handleContextDelete = async (node) => {
     const confirmed = window.confirm(
@@ -143,8 +160,6 @@ function WorkspacePage() {
 
   const activeFile = tabs.find((t) => t._id === activeTab) ?? null
 
-  const { isConnected, onlineUsers } = useSocket(repoId, reloadTree)
-
   console.log("🔥 ONLINE USERS:", onlineUsers)
 
   return (
@@ -154,17 +169,15 @@ function WorkspacePage() {
       overflow: 'hidden', backgroundColor: '#0D1117',
     }}>
 
-      {/* ── Top navbar ────────────────────────────────────────────────── */}
       <WorkspaceNavbar
         repoName={repo?.name ?? '…'}
         onlineUsers={onlineUsers}
         syncStatus={isConnected ? syncStatus : 'error'}
       />
 
-      {/* ── Main body ─────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
 
-        {/* ── Left: File Explorer ───────────────────────────────────── */}
+        {/* ── Left: File Explorer ─────────────────────────────────────── */}
         <div style={{
           width: '220px', flexShrink: 0,
           backgroundColor: '#161B22',
@@ -172,7 +185,6 @@ function WorkspacePage() {
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}>
-          {/* Explorer header + new file/folder buttons */}
           <div style={{
             padding: '10px 12px 6px',
             display: 'flex', alignItems: 'center',
@@ -185,7 +197,6 @@ function WorkspacePage() {
               Explorer
             </span>
             <div style={{ display: 'flex', gap: '4px' }}>
-              {/* New file */}
               <button
                 onClick={() => setNewItem({ type: 'file', parentId: null })}
                 title="New File"
@@ -200,7 +211,6 @@ function WorkspacePage() {
                   <line x1="9" y1="15" x2="15" y2="15"/>
                 </svg>
               </button>
-              {/* New folder */}
               <button
                 onClick={() => setNewItem({ type: 'folder', parentId: null })}
                 title="New Folder"
@@ -217,7 +227,6 @@ function WorkspacePage() {
             </div>
           </div>
 
-          {/* Tree — scrollable */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {treeLoading && (
               <div style={{ padding: '16px 12px', fontSize: '11px', color: '#484F58' }}>
@@ -247,8 +256,6 @@ function WorkspacePage() {
                 RenameInput={RenameInput}
               />
             )}
-
-            {/* Inline new item input */}
             {newItem && (
               <NewItemInput
                 placeholder={newItem.type === 'file' ? 'filename.js' : 'folder-name'}
@@ -280,6 +287,9 @@ function WorkspacePage() {
                 file={activeFile}
                 content={getContent(activeFile._id)}
                 onChange={setContent}
+                ignoreRemoteChange={ignoreRemoteChange}
+                onEditorMount={setEditorRef}
+                repoId={repoId}
               />
             )
           ) : (
@@ -304,7 +314,7 @@ function WorkspacePage() {
 
       </div>
 
-      {/* ── Status bar ────────────────────────────────────────────────── */}
+      {/* ── Status bar ──────────────────────────────────────────────── */}
       <div style={{
         height: '24px', flexShrink: 0,
         backgroundColor: '#161B22',
@@ -326,7 +336,6 @@ function WorkspacePage() {
         <span style={{ fontSize: '11px', color: '#484F58' }}>DevSync</span>
       </div>
 
-      {/* Context menu */}
       <FileContextMenu
         contextMenu={contextMenu}
         onClose={closeContextMenu}
