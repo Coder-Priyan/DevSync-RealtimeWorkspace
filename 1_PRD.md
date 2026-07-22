@@ -1,187 +1,168 @@
 # Product Requirements Document (PRD)
 
 ## Project Name
-
 DevSync
 
 ## Product Category
-
 Real-Time Collaborative Repository Workspace
 
 ---
 
 # 1. Introduction
 
-Modern software development is highly collaborative. Whether it is a college project, a hackathon submission, or a small team-based application, multiple developers are often required to work on the same codebase.
+Modern software development is highly collaborative. Whether it is a college project, a hackathon submission, or a small team-based application, multiple developers are often required to work on the same codebase at the same time.
 
-While version control systems provide a reliable way to manage source code, they are not designed for real-time collaboration. Team members frequently rely on file sharing, repeated synchronization, and external communication tools to coordinate development activities.
+Traditional version control systems (like Git) are built around asynchronous collaboration — commit, push, pull. They are excellent at preserving history but were never designed for two people to see each other typing in the same file at the same moment.
 
-DevSync aims to simplify this workflow by providing a shared repository workspace where collaborators can work on the same project simultaneously and view changes as they happen.
+DevSync fills that gap. It is a browser-based workspace where a repository is not a folder on someone's laptop, but a **shared live environment**: one canonical copy of the project, held on the server, that every collaborator edits directly and simultaneously.
 
 ---
 
 # 2. Problem Statement
 
-Students and beginner development teams often encounter challenges while working on shared projects.
+Small teams and student developers working on a shared codebase commonly run into:
 
-In many cases, project files are distributed across multiple local systems, resulting in:
+* Duplicate project copies across teammates' machines
+* Manual file sharing over chat apps before a proper Git setup exists
+* "Merge conflict" confusion for beginners unfamiliar with branching
+* No visibility into who is working on what, right now
+* Delayed visibility of changes — a teammate's edit is invisible until they push and you pull
 
-* Duplicate project versions
-* Manual file sharing
-* Frequent synchronization efforts
-* Delayed visibility of changes
-* Increased coordination overhead
-
-Although platforms such as GitHub help manage source code, contributors must still commit, push, and pull changes before updates become available to other team members.
-
-For small teams and academic projects, this workflow can become inefficient and difficult to manage.
+Git-based platforms solve version history well, but they add a layer of ceremony (branch, commit, push, pull, resolve conflicts) that is unnecessary overhead when a team just wants to **see the same file update live** while pair-programming or working through a hackathon deadline.
 
 ---
 
 # 3. Product Vision
 
-The vision of DevSync is to create a collaborative development environment where a project exists as a shared live workspace rather than a collection of isolated local copies.
+DevSync's vision is a workspace where a project exists as one shared live entity rather than a set of local copies stitched together at commit time.
 
-Every collaborator should be able to:
+Every collaborator on a repository should be able to:
 
-* Access the same repository
-* View project structure in real time
-* Edit files simultaneously
-* Stay synchronized automatically
-* Work without manually exchanging project files
-
-The platform should provide a single source of truth for the entire project.
+* Open the same repository and see the same file tree
+* Edit the same file at the same time as a teammate and see their keystrokes appear live
+* See who else is currently online in that repository
+* Trust that whatever they see is the current, persisted state — not a stale local copy
 
 ---
 
 # 4. Proposed Solution
 
-DevSync provides a repository-based workspace where all project files are stored centrally and synchronized across connected collaborators.
+DevSync organizes everything around the **repository** as the unit of collaboration. A repository owns a tree of folders and files, an owner, and a list of collaborators.
 
-Whenever a user performs an action such as creating a file, deleting a folder, or modifying code, the update is immediately reflected in the workspace of other active collaborators.
+When a user is inside a repository's workspace:
 
-Instead of sharing project archives or repeatedly synchronizing repositories, team members interact with the same live project environment.
+* File and folder operations (create/rename/delete) are saved through the REST API and then broadcast to everyone else currently viewing that repository, so their file tree updates without a manual refresh.
+* Code changes inside the Monaco-based editor are streamed over a Socket.IO connection to every other collaborator with that file open, in addition to being auto-saved to the database on a short debounce.
+* Presence (who is online, in which repository) is tracked in memory on the server and broadcast whenever someone joins or leaves.
 
-Completed repositories can be exported and executed locally using any preferred development environment.
+Access to a repository is controlled through an **invitation flow**: an owner sends an invite by email, the invited user sees it in their pending-invitations list, and accepting it adds them as a collaborator with full read/write access to that repository's files and folders.
+
+Repositories are also intended to be exportable as a ZIP archive so a collaborator can pull the current state down and run it locally — this is part of the product's initial scope, currently in progress.
 
 ---
 
 # 5. Target Users
 
-The platform is primarily designed for:
-
 ### College Students
-
-Students working on academic projects, assignments, and final-year development work.
+Students working on academic assignments, minor/major projects, and final-year submissions who need a lightweight way to co-develop without setting up Git branching workflows.
 
 ### Hackathon Teams
-
-Teams that require rapid collaboration during limited development timelines.
+Teams with a few hours to a couple of days who need to divide work across a shared codebase and see updates instantly instead of coordinating pushes.
 
 ### Beginner Developers
-
-Developers who are learning collaborative software development practices.
+Developers still building comfort with collaborative workflows, for whom "everyone edits the same live file" is a gentler mental model than distributed version control.
 
 ### Small Development Teams
-
-Teams looking for lightweight real-time collaboration without complex setup processes.
+Teams that want real-time pair-programming style collaboration without configuring a self-hosted Git server or paying for enterprise tooling.
 
 ---
 
 # 6. Product Objectives
 
-The primary objectives of the platform are:
-
-* Reduce dependency on manual project sharing.
-* Eliminate project synchronization issues.
-* Improve visibility of ongoing development activities.
-* Provide a centralized workspace for project collaboration.
-* Simplify team-based software development.
+* Let two or more people edit the same file at the same time and see each other's changes without refreshing.
+* Remove the need to manually share project files or zip archives mid-development.
+* Give every collaborator visibility into who else is active in the repository right now.
+* Provide a controlled way to grant repository access (invite → accept) instead of open sharing.
+* Persist every change so the repository state survives page reloads and server restarts.
+* Allow a finished or in-progress repository to be exported for local use.
 
 ---
 
 # 7. Core Functionalities
 
-The initial version of DevSync will provide the following capabilities:
+### User Authentication
+Email/password registration and login, with JWT-based session persistence used for both REST calls and the Socket.IO connection.
 
 ### Repository Management
+Create, list, view, rename/update, and delete repositories from a central dashboard. Repositories can be marked public or private.
 
-Users can create, access, and manage repositories from a centralized dashboard.
+### Collaborator & Invitation Management
+Repository owners can send an email-based invitation to a user. The invited user sees pending invitations and can accept or reject them. Accepting adds them to the repository's collaborator list with edit access. Invitations expire automatically after 7 days.
 
-### Collaborator Management
+### File & Folder Management
+Collaborators can create, rename, and delete files and nested folders inside a repository. These operations persist through the REST API and are broadcast live to everyone else viewing the same repository.
 
-Repository owners can invite team members and manage repository access.
+### Real-Time Collaborative Editing
+The in-browser code editor (Monaco) broadcasts every keystroke over Socket.IO to other collaborators who have the same file open, while the underlying content is auto-saved to MongoDB on a debounce so nothing is lost.
 
-### File and Folder Management
-
-Users can create, organize, rename, and remove project resources within the repository workspace.
-
-### Real-Time Collaboration
-
-All repository updates, including file operations and code modifications, are synchronized instantly among active collaborators.
+### Presence Awareness
+Every repository workspace shows a live list of who is currently online in that repository, updated the moment someone joins or disconnects.
 
 ### Repository Persistence
-
-All repository data is stored and maintained between sessions.
+All repository, folder, file, and user data is stored in MongoDB and survives sessions and restarts.
 
 ### Repository Export
-
-Repositories can be downloaded as ZIP archives for local development and execution.
+Repositories can be downloaded as a ZIP archive for local development — this capability is part of the product's committed scope and is currently being built out.
 
 ---
 
 # 8. Product Scope
 
-The scope of the initial release is focused on repository collaboration and synchronization.
+**Included in initial release:**
 
-Included in scope:
+* User authentication (register/login, JWT sessions)
+* Repository management (CRUD)
+* Invitation-based collaborator management
+* File and folder management
+* Real-time collaborative code editing
+* Presence indicators
+* Repository export as ZIP
 
-* User authentication
-* Repository management
-* Collaborator management
-* File management
-* Folder management
-* Real-time synchronization
-* Repository export
+**Excluded from initial release** (explicitly deferred):
 
-Excluded from scope:
+* Built-in code execution / sandboxed running of the project
+* Git-style version history or commit snapshots
+* AI-assisted development features
+* Repository analytics/activity logs
 
-* Built-in code execution
-* Version control history
-* AI-powered assistance
-* Project analytics
-
-These features may be introduced in future releases.
+These are candidates for future releases, not gaps in the current plan.
 
 ---
 
 # 9. Success Metrics
 
-The project will be considered successful if users are able to:
+The product is successful if a team can:
 
-* Collaborate within the same repository simultaneously.
-* Observe updates without manual synchronization.
-* Maintain a consistent repository state across collaborators.
-* Export projects successfully for local execution.
-* Complete collaborative development workflows without relying on file sharing.
+* Register, create a repository, and invite a teammate without leaving the app.
+* Have two browser sessions open the same file and see each other's edits appear within roughly a second, without refreshing.
+* See an accurate, live online/offline presence list for a repository.
+* Reload the page or restart the server and find the repository state unchanged.
+* Export a repository as a ZIP and run it locally.
 
 ---
 
 # 10. Future Direction
 
-The platform architecture should support future enhancements such as:
+Planned long-term extensions, out of scope for the current build:
 
-* Activity Tracking
-* Repository History
-* Snapshot Management
-* Built-In Project Execution
-* AI-Assisted Development Tools
-* Intelligent Code Review
-
-These capabilities are considered long-term extensions and are not part of the initial product release.
+* Activity logs / audit trail of who changed what and when
+* Version history and repository snapshots
+* Built-in project execution inside the browser
+* AI-assisted coding features (chat-based help, inline suggestions)
+* Repository analytics (contribution breakdowns, activity heatmaps)
 
 ---
 
-# Product Summaryy
+# Product Summary
 
-DevSync is a real-time collaborative repository workspace designed to simplify team-based software development. By combining repository management with live synchronization, the platform enables multiple developers to work on the same project without manual file sharing, repetitive synchronization processes, or fragmented project states.
+DevSync is a real-time collaborative repository workspace built to remove the friction of shared development for small teams and students. By combining repository and invitation-based access management with a live, socket-driven editing layer, it lets multiple developers work inside the same project simultaneously — without manual file sharing, without Git ceremony, and without losing track of who is working on what.
