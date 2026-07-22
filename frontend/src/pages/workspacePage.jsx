@@ -23,6 +23,7 @@ import { EditorPane }        from '@/features/workspace/components/Editor/Editor
 import { EditorPlaceHolder } from '@/features/workspace/components/Editor/EditorPlaceHolder'
 import { PresenceList }      from '@/features/workspace/components/CollabPane/PresenceList'
 import { InviteForm }        from '@/features/workspace/components/CollabPane/InviteForm'
+import { ReceivedInvitations } from '@/features/workspace/components/CollabPane/ReceivedInvitations'
 
 function NewItemInput({ placeholder, onConfirm, onCancel }) {
   const [value, setValue] = useState('')
@@ -309,6 +310,7 @@ function WorkspacePage() {
             <PresenceList onlineUsers={onlineUsers} />
             <div style={{ height: '1px', backgroundColor: '#30363D', margin: '8px 0' }} />
             <InviteForm repoId={repoId} />
+            <ReceivedInvitations />
           </div>
         </div>
 

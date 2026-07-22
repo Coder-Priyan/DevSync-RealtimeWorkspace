@@ -1,4 +1,4 @@
-// controllers/repositoryController.js (or add to existing controller file)
+// controllers/repositoryController.js 
 const Repository = require("../models/Repository");
 const User = require("../models/User");
 
@@ -44,7 +44,12 @@ const createRepository = async (req, res) => {
 const getUserRepositories = async (req, res) => {
   try {
     // Find repositories where owner is the authenticated user
-    const repositories = await Repository.find({ owner: req.user._id })
+    const repositories = await Repository.find({
+      $or: [
+        { owner: req.user._id }, // owned by user
+        { collaborators: req.user._id }, // or where user is a collaborator
+      ],
+    })
       .sort({ createdAt: -1 }) // newest first
       .populate('owner', 'username email profileImage'); // optional: populate owner details
 

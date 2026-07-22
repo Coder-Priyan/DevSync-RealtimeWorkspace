@@ -5,6 +5,7 @@ const express = require("express");
 const cors = require("cors");
 const fileRoutes = require("./routes/fileRoutes");
 const folderRoutes = require("./routes/folderRoutes");
+const invitationRoutes = require("./routes/invitationRoutes");
 
 const http = require("http");
 const { initSocket } = require("./sockets");
@@ -30,8 +31,8 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/repositories", repositoryRoutes);
 app.use("/api/files", fileRoutes);
-
 app.use("/api/folders", folderRoutes);
+app.use("/api/invitations", invitationRoutes);
 
 initSocket(httpServer);
 
