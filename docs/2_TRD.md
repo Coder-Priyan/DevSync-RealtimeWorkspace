@@ -1,162 +1,233 @@
-# Technical Requirements Document (TRD)
+# Technical Requirements Document
 
-## Project Name
-DevSync
+**DevSync — Real-Time Collaborative Development Workspace**
 
----
-
-# 1. Purpose
-
-This document defines the technical architecture, stack, and engineering conventions for DevSync. It is written as the technical contract the implementation follows — every decision here is one the codebase actually reflects, so that anyone (including future-us) can pick up the project and know exactly how it is wired together.
+*Defines system architecture, components, and technical implementation. For product scope, see the [PRD](1_PRD.md). For request-level flow, see [Application Flow](3_AppFlow.md).*
 
 ---
 
-# 2. Technology Stack
+## Table of Contents
 
-### Frontend
-* **React 19** with **Vite** as the build tool
-* **React Router v6/v7** for client-side routing, using lazy-loaded route components
-* **Tailwind CSS v4**, configured via the `@tailwindcss/vite` plugin and `@theme` blocks (Tailwind v4 no longer uses a `tailwind.config.js`-driven theme in the same way v3 did — custom design tokens are declared inside CSS with `@theme`)
-* **Socket.IO Client** for the real-time layer
-* **Monaco Editor** (`@monaco-editor/react`) as the in-browser code editor
-* **Axios** for REST calls
-* **lucide-react** for icons
-
-### Backend
-* **Node.js** with **Express 5**
-* **Socket.IO** (server) for real-time communication, sharing the same HTTP server instance as Express
-* **MongoDB** with **Mongoose** as the ODM
-* **JWT** (`jsonwebtoken`) for stateless authentication
-* **bcryptjs** for password hashing
-* **CommonJS** module syntax throughout the backend (no ESM) — this is a deliberate, consistent choice, not a mix
-
-### Tooling
-* **nodemon** for backend dev reload
-* **ESLint** on the frontend
-* **dotenv** for environment configuration
+- [System Overview](#system-overview)
+- [Architecture](#architecture)
+- [Components](#components)
+- [Module Responsibilities](#module-responsibilities)
+- [Technology Choices](#technology-choices)
+- [Real-Time Design](#real-time-design)
+- [Data Flow](#data-flow)
+- [API Surface](#api-surface)
+- [Security](#security)
+- [Scalability](#scalability)
+- [Limitations](#limitations)
 
 ---
 
-# 3. System Architecture
+## System Overview
 
-```
-┌─────────────────┐        REST (Axios, JWT bearer)        ┌──────────────────┐
-│  React Frontend │ ──────────────────────────────────────▶│  Express API     │
-│  (Vite, Tailwind)│◀────────────────────────────────────── │  (Node.js)       │
-└─────────────────┘                                         └──────────────────┘
-        │                                                            │
-        │        Socket.IO (JWT handshake auth)                      │
-        └───────────────────────────────────────────────────────────▶│
-                                                                       ▼
-                                                              ┌──────────────────┐
-                                                              │  Socket.IO Server │
-                                                              │  (shares httpServer)│
-                                                              └──────────────────┘
-                                                                       │
-                                                                       ▼
-                                                              ┌──────────────────┐
-                                                              │  MongoDB (Mongoose)│
-                                                              └──────────────────┘
+DevSync is a Node.js/Express backend exposing a REST API for persistence, paired with a Socket.IO layer for real-time synchronization, and a React frontend. A repository is the core unit of collaboration: it owns files, folders, and a list of collaborators. Every client currently viewing a repository joins a dedicated Socket.IO room for that repository, so edits, tree changes, and presence updates reach every collaborator without a page refresh.
+
+---
+
+## Architecture
+
+```mermaid
+graph TD
+    UI[React Frontend] -->|REST — axios| API[Express API]
+    UI -->|WebSocket| IO[Socket.IO Server]
+
+    API --> AUTH[authController]
+    API --> REPO[repositoryController]
+    API --> FILE[fileController]
+    API --> FOLDER[folderController]
+    API --> INVITE[invitation.controller]
+
+    AUTH --> DB[(MongoDB)]
+    REPO --> DB
+    FILE --> DB
+    FOLDER --> DB
+    INVITE --> DB
+
+    IO --> MW[socketAuthMiddleware]
+    MW --> WS[workspace.socket.js]
+    WS --> PR[presence.socket.js]
+    WS --> ED[editor.socket.js]
+    WS --> FS[file.socket.js]
+    WS --> FO[folder.socket.js]
 ```
 
-The Express app and the Socket.IO server are attached to the **same** `http.Server` instance in `server.js`. There is one process, one port, two protocols.
+---
 
-### Core architectural rule: REST owns persistence, sockets only broadcast
+## Components
 
-This is the single most important rule in the system:
-
-* Every create/update/delete for repositories, files, folders, and invitations happens through a REST endpoint, which is the only thing that writes to MongoDB.
-* After a successful REST write, the controller emits a Socket.IO event to the relevant repository room (`repo:<repositoryId>`) so everyone else's UI updates.
-* Sockets are **never** the source of truth for anything except two things that are intentionally ephemeral and never persisted: (1) live editor keystrokes broadcast between collaborators before the debounce auto-save lands, and (2) in-memory presence (who is online).
-
-This means: if a socket message is lost, the data is not lost — the REST call already persisted it. Sockets are a UX layer on top of a REST backbone, not a replacement for it.
+| Component | Responsibility |
+|---|---|
+| `authController` | Registration, login (bcrypt + JWT), and profile retrieval |
+| `repositoryController` | Repository CRUD, plus adding/listing/removing collaborators on a repository |
+| `fileController` / `folderController` | CRUD for files and folders scoped to a repository |
+| `invitation.controller` | Send, list (received), accept, and reject repository invitations |
+| `socketAuthMiddleware` | Verifies the JWT sent in the Socket.IO handshake before a connection is allowed to proceed |
+| `workspace.socket.js` | Owns room membership — joining/leaving a repository's `repo:<id>` room, and dispatching to the other handlers on connect |
+| `presence.socket.js` | In-memory store of who is connected to which repository room; broadcasts on every join/leave |
+| `editor.socket.js` | Validates and relays live code changes to everyone else with the same file open |
+| `file.socket.js` / `folder.socket.js` | Broadcast file/folder create, rename, and delete events to a repository's room |
 
 ---
 
-# 4. Authentication
+## Module Responsibilities
 
-* Registration and login are REST endpoints (`/api/auth/register`, `/api/auth/login`). Passwords are hashed with bcrypt before storage; plaintext passwords are never persisted or logged.
-* On successful login, the server issues a signed JWT containing the user's id. The frontend stores this token and attaches it as a Bearer token on every REST call.
-* REST routes that require a logged-in user go through an Express `protect` middleware that verifies the JWT and attaches `req.user`.
-* The **same JWT** is reused to authenticate the Socket.IO connection: the token is passed in `socket.handshake.auth.token`, verified by a Socket.IO middleware (`socketAuthMiddleware`) before the connection is accepted, and the resulting user is attached as `socket.user`. There is one identity system, not two.
-* If the token is missing, invalid, or expired, the socket connection is rejected before any event handlers run.
+**`workspace.socket.js`** is the entry point for every authenticated socket connection. It registers the presence and editor handlers, then owns the `WORKSPACE_JOIN`/`WORKSPACE_LEAVE`/`disconnect` lifecycle: looking up the repository, moving the socket between rooms, and tracking the socket's current repository on `socket.data.currentRepository` so other handlers can validate against it.
+
+**`presence.socket.js`** deliberately keeps state in memory (`repositoryId → socketId → { userId, username, socketId, joinedAt }`) rather than in MongoDB. Presence is a live-connection concept — it is correct for it to reset when the server restarts, since every socket disconnects at that point too. Deduplication happens by `userId` at read time, so a user with two tabs open in the same repository appears once in the broadcast list.
+
+**`editor.socket.js`** checks that an incoming `editor:change` event's `repositoryId` matches the socket's actual current room (`socket.data.currentRepository`) before broadcasting — this prevents a stale or spoofed client from injecting changes into a room it isn't actually part of. Changes are relayed with `socket.broadcast.to(room)`, so the sender never receives its own echo.
+
+**`repositoryController`** stores collaborators as an array of `User` references directly on the `Repository` document, rather than through a separate join model — access control for a repository is a membership check against this array plus the `owner` field.
+
+**`invitation.controller`** together with the `Invitation` model implements the actual access-granting flow: an invitation is created with `pending` status, optionally has a TTL-indexed `expiresAt`, and moves to `accepted` or `rejected` when the invited user responds. MongoDB's TTL index automatically removes expired invitation documents without a manual cleanup job.
 
 ---
 
-# 5. Real-Time Layer (Socket.IO)
+## Technology Choices
+
+| Choice | Rationale |
+|---|---|
+| Express 5 | REST API framework backing repository/file/folder/auth/invitation resources |
+| Socket.IO | WebSocket layer with automatic fallback to polling, room support, and per-connection middleware — used for all real-time propagation |
+| MongoDB + Mongoose | Document model fits the nested repository → folder → file relationship and collaborator arrays without a rigid relational schema |
+| JWT (shared between REST and sockets) | A single token issued at login authenticates both HTTP requests (`Authorization` header) and the Socket.IO handshake (`auth.token`), avoiding a second auth mechanism for real-time |
+| bcrypt | Standard password hashing for the `User` model |
+| Monaco Editor | Same editor engine as VS Code, used client-side for the collaborative code-editing surface |
+| React 19 + Vite | Frontend framework and build tool for the dashboard and workspace UI |
+
+---
+
+## Real-Time Design
 
 ### Room model
-Each repository maps to exactly one Socket.IO room: `repo:<repositoryId>`. A socket joins this room via a `workspace:join` event after connecting, and the server tracks which repository each socket currently belongs to on `socket.data.currentRepository`. Switching repositories automatically leaves the previous room.
+Every repository maps to a Socket.IO room named `repo:<repositoryId>`. A socket joins this room via `WORKSPACE_JOIN` and is tracked on `socket.data.currentRepository`; all subsequent handlers (presence, editor, file, folder) validate against this value before broadcasting, so events are scoped to the correct repository and never leak across rooms.
 
-### Event naming
-All event name strings live in a single constants file (`sockets/events.js` on the backend, mirrored in `constants/events.js` / `socket/events.js` on the frontend). No event name is ever hand-typed as a string literal elsewhere — this is a strict convention to prevent typo-based bugs between client and server.
+### Event catalog
 
-### Socket responsibility split
-Real-time behaviour is split into narrowly scoped handler modules, each owning one concern:
+| Event | Direction | Handler |
+|---|---|---|
+| `workspace:join` / `workspace:joined` | client ↔ server | `workspace.socket.js` |
+| `workspace:leave` | client → server | `workspace.socket.js` |
+| `presence:update` | server → room | `presence.socket.js` |
+| `editor:join` | client → server | `editor.socket.js` |
+| `editor:change` | client → server | `editor.socket.js` |
+| `editor:update` | server → room (excludes sender) | `editor.socket.js` |
+| `file:created` / `file:renamed` / `file:deleted` | server → room | `file.socket.js` |
+| `folder:created` / `folder:renamed` / `folder:deleted` | server → room | `folder.socket.js` |
+| `error` | server → client | any handler, on invalid payload or unauthorized action |
 
-* **`workspace.socket.js`** — owns room join/leave lifecycle and disconnect handling. This is the only file that calls `socket.join()` / `socket.leave()`.
-* **`presence.socket.js`** — owns the in-memory presence store (a map of repository → online users), and broadcasts `presence:update` whenever someone joins or leaves. It exposes join/leave callbacks that `workspace.socket.js` invokes; it does not touch room membership itself.
-* **`editor.socket.js`** — owns live collaborative text sync. Listens for `editor:join` (user opened a file) and `editor:change` (user typed), and re-broadcasts changes as `editor:update` to every other socket in the room — never back to the sender.
-
-File and folder real-time updates (`file:created`, `file:renamed`, `file:deleted`, `folder:created`, `folder:renamed`, `folder:deleted`) are emitted directly from the REST controllers after a successful database write, rather than from a dedicated socket handler — because the action originates from an HTTP request, not a socket event, so persistence and broadcast happen in the same place.
-
-### Frontend socket lifecycle
-The socket connection itself is managed exclusively by the `useSocket` hook — nothing else calls `connectSocket()`/`disconnectSocket()`. `useSocket` exposes the live socket instance in React state so that dependent hooks (like `useEditor`) receive it as a parameter once it exists, rather than reaching for a module-level getter that may return `null` before the socket is created. This ordering fix (socket instance as an explicit parameter through the component hierarchy) was necessary because effects that ran before the socket existed would silently register no listeners.
-
-### Collaborative editing conflict avoidance
-The editor uses an `ignoreRemoteChange` ref (not state, because it must be read synchronously inside Monaco's change callback) to distinguish a locally-typed change from a remotely-applied one:
-
-1. Local keystroke → `setContent()` → emits `editor:change` immediately (no debounce, for real-time feel) → also schedules a debounced REST auto-save (~800ms) for persistence.
-2. Remote update arrives → `applyRemoteUpdate()` sets the guard flag, calls `editor.setValue()`, restores cursor position, then clears the guard — so Monaco's own change event fired by `setValue()` does not get re-broadcast as if the local user typed it.
+### Authentication at the socket layer
+`socketAuthMiddleware` runs before `connection` is emitted: it reads `socket.handshake.auth.token`, verifies it with the same `JWT_SECRET` used by the REST API, loads the user, and attaches a minimal `{ _id, username, email }` to `socket.user`. A connection with a missing, invalid, or expired token is rejected before any handler executes.
 
 ---
 
-# 6. REST API Conventions
+## Data Flow
 
-* Base path: `/api/<resource>` (`/api/auth`, `/api/repositories`, `/api/files`, `/api/folders`, `/api/invitations`).
-* All protected routes use the `protect` middleware; there is no separate role-based middleware — authorization (owner vs. collaborator vs. neither) is checked inline inside each controller function against the resource being accessed.
-* Every JSON response follows a consistent envelope: `{ success: boolean, message?: string, ...data }`.
-* Mongoose `ObjectId` cast errors are caught explicitly and translated into a `404` ("not found") rather than leaking a `500`.
-* Authorization pattern used throughout: a request is allowed if the requesting user is either the repository's `owner` or present in its `collaborators` array — this check is duplicated per-controller rather than centralized in middleware, which is a known area for future refactoring but is consistent in behaviour today.
+### Authentication
+```
+POST /api/auth/register → bcrypt.hash(password) → User.create() → 201
+POST /api/auth/login    → User.findOne(email) → bcrypt.compare() → generateToken(userId) → JWT
+```
 
----
+### File/Folder Mutation
+```
+Client REST call → controller persists to MongoDB → controller returns response
+                                                    → corresponding socket event broadcast to repo:<id> room
+                                                    → other clients update their file tree without a refetch
+```
 
-# 7. Data Layer
+### Live Editing
+```
+User types in Monaco → editor:change { repositoryId, fileId, content }
+                     → editor.socket.js validates socket.data.currentRepository === repositoryId
+                     → socket.broadcast.to(repo:<id>).emit(editor:update, { fileId, content })
+                     → other clients with that file open apply the update
+```
 
-* MongoDB via Mongoose, with all schemas using `{ timestamps: true }` for automatic `createdAt`/`updatedAt`.
-* Relationships are modeled with `ObjectId` references (`ref: 'User'`, `ref: 'Repository'`, etc.) rather than embedded documents, so files/folders/invitations are separate collections that reference their parent repository.
-* The `Invitation` model carries three indexes intentionally: a compound index on `(invitedUser, status)` for the "my pending invitations" query, a compound index on `(repository, invitedUser)` to detect duplicate pending invites, and a TTL index on `expiresAt` so MongoDB automatically deletes expired invitations without a manual cleanup job.
-* Full schema definitions are covered in `5_BackendSchema.md`.
-
----
-
-# 8. Frontend Architecture
-
-* **Feature-Sliced Design**: code is organized by feature (`features/auth`, `features/dashboard`, `features/workspace`), each with its own `components/`, `hooks/`, and services, rather than by technical layer alone. Cross-cutting concerns (shared UI primitives, layout shell, generic hooks) live outside the feature folders.
-* **Routing**: a single `AppRouter.jsx` is the only file that defines `<Route>` elements. Pages are lazy-loaded with `React.lazy()` so route bundles are code-split.
-* **Auth guarding**: `ProtectedRoute` wraps authenticated routes and redirects to `/login` if there's no valid session; a `PublicOnlyRoute` wrapper does the inverse for `/login` and `/register` so an already-authenticated user is redirected to the dashboard instead of seeing the auth forms again.
-* **State**: React Context (`AuthContext`) holds session/auth state; everything else is local component/hook state — there is no global store (Redux/Zustand) in the current architecture.
-
----
-
-# 9. Environment & Configuration
-
-* Backend environment variables (`.env`): Mongo connection string, `JWT_SECRET`, `PORT`, `CLIENT_URL` (used for Socket.IO CORS origin).
-* CORS is enabled broadly on the Express app; Socket.IO CORS origin defaults to `CLIENT_URL` or `*` if unset.
+### Joining a Workspace
+```
+Client navigates to workspace → useSocket connects, emits workspace:join { repositoryId }
+                              → workspace.socket.js verifies repository exists
+                              → socket.join(repo:<id>) + presence add + broadcastPresence()
+                              → socket receives workspace:joined { repositoryId, users }
+```
 
 ---
 
-# 10. Non-Functional Requirements
+## API Surface
 
-* **Consistency over cleverness**: REST is always the durable write path; sockets are always a broadcast layer. This rule must hold for any new real-time feature added later.
-* **Predictable room semantics**: a socket belongs to at most one repository room at a time; joining a new one always leaves the previous one first.
-* **Graceful degradation of real-time features**: if the socket disconnects, REST-based CRUD (file/folder create, rename, delete, repository management) must continue to work; only live keystroke sync and presence are affected.
-* **Consistent event vocabulary**: no new socket event is introduced without adding it to the shared events constants file on both frontend and backend.
+**Auth**
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/register` | — | Register a new user |
+| POST | `/api/auth/login` | — | Log in, receive a JWT |
+| GET | `/api/auth/profile` | ✅ | Get the authenticated user's profile |
+
+**Repositories**
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/repositories` | ✅ | Create a repository |
+| GET | `/api/repositories` | ✅ | List the user's repositories |
+| GET | `/api/repositories/:id` | ✅ | Get a repository by ID |
+| PUT | `/api/repositories/:id` | ✅ | Update a repository |
+| DELETE | `/api/repositories/:id` | ✅ | Delete a repository |
+| POST | `/api/repositories/:id/collaborators` | ✅ | Add a collaborator |
+| GET | `/api/repositories/:id/collaborators` | ✅ | List collaborators |
+| DELETE | `/api/repositories/:id/collaborators/:userId` | ✅ | Remove a collaborator |
+
+**Files & Folders**
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/files/:repositoryId` | ✅ | Create a file |
+| GET | `/api/files/:repositoryId` | ✅ | List files in a repository |
+| GET | `/api/files/single/:fileId` | ✅ | Get a single file |
+| PUT | `/api/files/:fileId` | ✅ | Update a file |
+| DELETE | `/api/files/:fileId` | ✅ | Delete a file |
+| POST | `/api/folders/:repositoryId` | ✅ | Create a folder |
+| GET | `/api/folders/:repositoryId` | ✅ | List folders in a repository |
+| PUT | `/api/folders/:folderId` | ✅ | Update a folder |
+| DELETE | `/api/folders/:folderId` | ✅ | Delete a folder |
+
+**Invitations**
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/invitations` | ✅ | Send an invitation |
+| GET | `/api/invitations/received` | ✅ | List invitations received by the user |
+| PUT | `/api/invitations/:invitationId/accept` | ✅ | Accept an invitation |
+| PUT | `/api/invitations/:invitationId/reject` | ✅ | Reject an invitation |
+
+All ✅ routes require `Authorization: Bearer <token>` and pass through the `protect` middleware.
 
 ---
 
-# 11. Out of Scope (Technical)
+## Security
 
-* Operational Transform / CRDT-based conflict resolution for simultaneous edits to the same character range — the current model is "last write broadcast wins" at the socket layer, which is acceptable for the product's target usage (small teams, not adversarial concurrent editing of the exact same line).
-* Horizontal scaling of the Socket.IO layer (e.g. a Redis adapter for multi-instance deployments) — the current design assumes a single server process, matching in-memory presence storage.
-* Server-side code execution/sandboxing.
+- Passwords are hashed with bcrypt before storage; plaintext passwords are never persisted.
+- REST routes are protected by JWT verification middleware (`protect`) that attaches the resolved user to `req.user`.
+- Socket.IO connections are authenticated at the handshake via the same JWT, using a dedicated `socketAuthMiddleware` — a socket cannot join `connection` at all without a valid token.
+- Editor and file/folder events are validated against the socket's tracked current room before being broadcast, preventing a connected-but-uninvited socket from injecting changes into a repository room it hasn't joined.
+- There is currently no centralized error-handling middleware (`errorMiddleware.js` is an unimplemented stub) — each controller handles its own try/catch and error response shape.
+
+---
+
+## Scalability
+
+The current build runs as a single Node.js process handling both the REST API and the Socket.IO server, with an in-memory presence store scoped to that process. This is appropriate for the project's target scale (small teams, classroom, hackathon use) but does not yet support horizontal scaling — running multiple server instances would require a shared presence/adapter layer (e.g. the Socket.IO Redis adapter) so rooms and presence stay consistent across instances. This is a known, intentional limitation of the current scope rather than an oversight.
+
+---
+
+## Limitations
+
+- **No centralized error handling** — `middleware/errorMiddleware.js` exists as a file but is currently empty; error responses are shaped per-controller.
+- **No dedicated Collaborator model** — collaborators are stored as a `User` reference array directly on `Repository`; `models/Collaborator.js` and `controllers/collaboratorController.js` are present as empty stubs, not currently used.
+- **No repository export** — `services/exportService.js` and `utils/zipRepository.js` are present as empty stubs; ZIP export is not yet functional.
+- **In-memory presence only** — presence state is not persisted and does not survive a server restart (by design, see [Real-Time Design](#real-time-design)).
+- **Single-instance only** — no multi-node/horizontal scaling support in the current architecture.
