@@ -1,141 +1,72 @@
 # Implementation Plan
 
-## Project Name
-DevSync
+**DevSync — Real-Time Collaborative Development Workspace**
+
+*Documents build milestones and development strategy. For the resulting architecture, see the [TRD](2_TRD.md).*
 
 ---
 
-# 1. Approach
+## Table of Contents
 
-The plan is organized into sequential stages, each building on a stable version of the one before it. This ordering isn't arbitrary — it reflects the actual dependency chain of the system: authentication has to exist before anything can be "owned"; repositories have to exist before files/folders can belong to something; the file tree has to exist before an editor has anything to open; and the editor has to exist before real-time sync has content worth syncing.
-
----
-
-# 2. Stage 1 — Authentication Foundation
-
-**Goal:** A user can register, log in, and have a persistent session.
-
-* `User` model (username, email, password hash, profileImage)
-* `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/profile`
-* JWT issuance on login; `protect` middleware for guarded REST routes
-* Frontend: `AuthContext`, `LoginForm`, `RegisterForm`, `ProtectedRoute` / `PublicOnlyRoute`, token persisted client-side and restored on load
-
-**Exit criteria:** A user can register, log in, refresh the page, and remain logged in; unauthenticated users are redirected away from protected routes.
+- [Development Strategy](#development-strategy)
+- [Milestones](#milestones)
+- [Milestone Detail](#milestone-detail)
+- [Highest-Risk Milestone](#highest-risk-milestone)
+- [Future Milestones](#future-milestones)
 
 ---
 
-# 3. Stage 2 — Repository Management
+## Development Strategy
 
-**Goal:** A logged-in user can create and manage repositories.
-
-* `Repository` model (name, description, owner, isPublic, collaborators)
-* Full CRUD: `POST/GET/PUT/DELETE /api/repositories`, plus `GET /api/repositories/:id`
-* Ownership-based authorization inline in each controller (owner-only for update/delete)
-* Frontend: `DashboardPage`, `useDashboard`, `RepoList`, `RepoCard`, `CreateRepoModal`
-
-**Exit criteria:** A user can create a repository, see it on their dashboard, update its details, and delete it; only the owner can modify or delete it.
+DevSync was built bottom-up: authentication and persistence first, then a static workspace UI, then the real-time layer, and finally live collaborative editing — each phase building on a previously working foundation rather than building the full UI against a real-time layer that didn't exist yet. This let session handling, the file tree, and the editor UI all be verified against real REST data before any Socket.IO code had to be trusted.
 
 ---
 
-# 4. Stage 3 — File & Folder Management (REST layer)
+## Milestones
 
-**Goal:** Repositories can hold a real file/folder structure, fully through REST first.
-
-* `Folder` model (name, repository, parentFolder, createdBy) and `File` model (name, content, repository, createdBy, folder)
-* Full CRUD for both: `POST/GET/PUT/DELETE /api/folders/...`, `/api/files/...`
-* Authorization extended to "owner or collaborator" across file/folder endpoints
-* Frontend: `FileTree`, `TreeNode`, `FileContextMenu`, `useFileTree`
-
-**Exit criteria:** A collaborator can build out a folder/file structure inside a repository and see it correctly nested in the sidebar. Real-time propagation of these changes comes in a later stage — at this point the tree updates only for the user performing the action.
-
-**Bug resolved during this stage:** the `File` schema was initially missing its `folder` reference field, so newly created files couldn't be correctly nested under a folder. Fixed by adding `folder: { type: ObjectId, ref: 'Folder', default: null }`.
+| # | Milestone | Outcome |
+|---|---|---|
+| 1 | Auth + session handling | Register/login, JWT persistence, protected routing |
+| 2 | Repository, file & folder REST API | Full CRUD backing the dashboard and file tree |
+| 3 | Socket.IO foundation + presence | Authenticated socket connections, room join/leave, live online-user list |
+| 4 | Real-time collaborative editor | Monaco integration, live `editor:change`/`editor:update` sync |
+| 5 | Collaborator invitations | Send/accept/reject flow with TTL-based expiry |
+| — | File/folder real-time broadcast | Emitted directly from REST controllers via `getIO()`; dedicated socket handlers remain unimplemented |
 
 ---
 
-# 5. Stage 4 — Real-Time Socket Layer (Presence + File/Folder Broadcast)
+## Milestone Detail
 
-**Goal:** File/folder operations and online presence become visible live to every collaborator, not just the person who performed the action.
+**1 — Auth + Session Handling**
+Implemented `User` model, bcrypt password hashing, JWT issuance on login, and the `protect` middleware for REST routes. On the frontend, built `ProtectedRoute` with an explicit three-phase check — restoring a session from `localStorage`, redirecting when no valid session exists, or rendering the matched route once authenticated.
 
-* Socket.IO server attached to the same HTTP server as Express; JWT-based handshake authentication (`socketAuthMiddleware`)
-* Room model: one room per repository (`repo:<repositoryId>`), joined via `workspace:join`
-* `workspace.socket.js` — room lifecycle; `presence.socket.js` — in-memory presence tracking and `presence:update` broadcasts
-* REST controllers for file/folder create/rename/delete extended to emit their matching socket event after a successful write
-* Frontend: `useSocket` hook owns the socket connection lifecycle end-to-end; `usePresence`, `PresenceList`, `UserPresenceRow`
+**2 — Repository, File & Folder REST API**
+Built `repositoryController`, `fileController`, and `folderController` with full CRUD, gated by an owner-or-collaborator check against `Repository.owner` / `Repository.collaborators`. Built the dashboard UI (`RepoCard`, `CreateRepoModal`) and the workspace's file explorer (`FileTree`, `TreeNode`) against this REST layer, with no real-time behavior yet.
 
-**Exit criteria:** Two browser sessions in the same repository see each other's file/folder changes and each other's online status without refreshing.
+**3 — Socket.IO Foundation + Presence**
+Added `sockets/index.js` (server init), `sockets/middleware.js` (JWT-authenticated handshake), and `workspace.socket.js` to manage `repo:<id>` room membership. Implemented `presence.socket.js` as an in-memory, per-repository presence store, deduplicated by user across multiple tabs. At this stage, `file.socket.js` and `folder.socket.js` were scaffolded as placeholders for a planned dedicated file/folder event layer.
 
----
+**4 — Real-Time Collaborative Editor**
+Replaced the workspace's plain-text placeholder with Monaco Editor. Added `EDITOR_JOIN`, `EDITOR_CHANGE`, and `EDITOR_UPDATE` to the shared event catalog and implemented `editor.socket.js` to validate room membership before relaying a change to every other client with that file open. On the client, reworked hook ordering so `useSocket` establishes the connection before `useEditor` attaches its listener to the real socket instance, rather than a stale `null` reference — this was an explicit fix made mid-phase (see inline `Phase 4 fix` comments in `useEditor.js` and `useSocket.js`).
 
-# 6. Stage 5 — Real-Time Collaborative Editing
+**5 — Collaborator Invitations**
+Implemented the `Invitation` model with compound indexes for "pending invitations for a user" and "invitations for a repository," plus a TTL index for automatic expiry. Built `invitation.controller`, the invite/accept/reject routes, and the `InviteForm` / `ReceivedInvitations` components in the workspace's collaboration panel.
 
-**Goal:** The Monaco editor supports live, multi-user text synchronization.
-
-* `editor.socket.js` — `editor:join` / `editor:change` → `editor:update` broadcast (never echoed back to the sender)
-* Frontend: `useEditor` hook — local keystrokes emit immediately over the socket for real-time feel, plus a debounced (~800ms) REST auto-save (`PUT /api/files/:fileId`) for persistence
-* `ignoreRemoteChange` ref guard to prevent a remotely-applied update from being re-broadcast as if it were a local edit
-* `EditorPane`, `TabBar`, `EditorPlaceHolder`, sync status indicator in `StatusBar`
-
-**Exit criteria:** Two users with the same file open see each other's keystrokes appear live, and the content is durably saved regardless of socket connectivity.
-
-**Bug resolved during this stage:** a timing bug where `useEditor` initialized before `useSocket` had created the socket instance, so `getSocket()` returned `null` and the `editor:update` listener never registered. Fixed by having `useSocket` hold the socket instance in state and pass it down explicitly as a parameter, so dependent effects re-run once the real instance exists.
+**File/Folder Real-Time Broadcast (cross-cutting)**
+Rather than completing the dedicated `file.socket.js`/`folder.socket.js` handlers scaffolded in Milestone 3, live file-tree sync was instead wired directly from the REST layer: `fileController` and `folderController` call `getIO()` after a successful create/rename/delete and emit `file:*`/`folder:*` events to the repository's room. This achieves the same real-time effect through the controller layer rather than a separate socket handler, and is the reason those two handler files remain empty placeholders in the current codebase.
 
 ---
 
-# 7. Stage 6 — UI/UX Polish & Design System Consolidation
+## Highest-Risk Milestone
 
-**Goal:** Bring the interface to a consistent, professional baseline before adding further features.
-
-* Tailwind v4 migration, including moving custom design tokens into `@theme` CSS blocks (a v4 requirement, not a stylistic choice)
-* Shared component layer (`Button`, `Input`, `Modal`, `AvatarBadge`, `EmptyState`, `FileIcon`) to remove one-off styled elements
-* `AppShell`, `Navbar`, `Sidebar`, `StatusBar` finalized as the persistent layout frame
-* Various import-path and API base-URL mismatches identified and corrected across the frontend (`AuthContext` import paths, Axios base URL config)
-
-**Exit criteria:** The app has one consistent visual language end-to-end, with no ad-hoc inline styling competing with the design tokens.
+Milestone 4 (real-time editor) carried the most iteration risk. The initial implementation called `useSocket` and `useEditor` in an order where `useEditor` captured the socket reference before it existed, so its `EDITOR_UPDATE` listener registered against `null` instead of the live connection — edits would broadcast out but never apply back in. This was resolved by passing the socket instance as an explicit parameter from `useSocket` into `useEditor`, guaranteeing listener registration only happens once a real socket exists, rather than relying on effect-ordering assumptions.
 
 ---
 
-# 8. Stage 7 — Repository Invitation System *(current stage)*
+## Future Milestones
 
-**Goal:** Replace ad-hoc, direct collaborator addition with a proper invite/accept flow.
-
-* `Invitation` model with `pending`/`accepted`/`rejected` status, 7-day expiry, and three purpose-built indexes (see `5_BackendSchema.md`)
-* `POST /api/invitations` (send), `GET /api/invitations/received` (list mine), `PUT /api/invitations/:id/accept`, `PUT /api/invitations/:id/reject`
-* Ownership, duplicate-invite, self-invite, and already-collaborator checks in the send flow; ownership and expiry checks in accept/reject
-* Frontend: `InviteForm`, `ReceivedInvitations`, `UserPresenceRow`, `useInvitations`, `invitation.service.js`
-
-**Status:** Backend controller and routes are implemented; frontend hook and components are wired for the received-invitations list and the invite form. Remaining work: final UI polish on the invite/accept experience, and reconciling this flow with the older direct `addCollaborator` endpoint on `repositoryController` (see Section 10).
-
----
-
-# 9. Stage 8 — Repository Export *(next up)*
-
-**Goal:** Let a user download a repository's current file/folder structure as a ZIP archive.
-
-* `utils/zipRepository.js` and `services/exportService.js` are scaffolded but currently empty — this is the next concrete implementation task.
-* Planned approach: walk the repository's `Folder`/`File` documents to reconstruct the tree in-memory, stream it into a ZIP (e.g. via `archiver` or a similar library), and serve it as a file download from a new authenticated endpoint (e.g. `GET /api/repositories/:id/export`).
-* Frontend `ExportButton` already exists in the workspace toolbar and simply needs to be wired to the new endpoint once it exists.
-
-**Exit criteria:** A collaborator can click Export and receive a ZIP that, when extracted, reproduces the repository's folder/file structure and contents.
-
----
-
-# 10. Cleanup Items Carried Forward
-
-These are known rough edges, explicitly tracked rather than silently left in the codebase:
-
-* **Duplicate collaborator-add paths.** `repositoryController.addCollaborator` (direct, by email, owner-only) still exists alongside the newer invitation flow. Decide whether direct-add is kept as an owner shortcut or removed in favor of invitations being the only path.
-* **`Collaborator.js` model file is empty and unused.** Either remove it or repurpose it if per-collaborator roles are introduced later.
-* **No cascade delete for repositories.** Deleting a repository currently orphans its files, folders, and invitations at the database level.
-* **Socket handler placeholders.** `handlers/file.socket.js` and `handlers/folder.socket.js` exist as empty placeholder modules — real-time file/folder broadcasting is currently implemented directly inside the REST controllers instead. Either remove these placeholder files or formally document that this is the intended final architecture (per `2_TRD.md`, Section 3).
-
----
-
-# 11. Interview-Readiness Checklist (Cross-Reference)
-
-For placement/interview prep purposes, the stages above map directly onto talking points already prepared:
-
-* Feature-Sliced Design → Stage 6
-* Socket singleton pattern (`useSocket` owning the connection lifecycle) → Stage 4/5
-* `ignoreRemoteChange` ref pattern → Stage 5
-* REST-as-source-of-truth / sockets-only-broadcast architecture rule → Stage 4 (TRD Section 3)
-* JWT reused across REST and socket auth → Stage 1 (TRD Section 4)
+- Complete `file.socket.js` / `folder.socket.js` as proper dedicated handlers, or formally retire them in favor of the controller-driven broadcast pattern already in use
+- Repository export as a ZIP archive (`exportService.js`, `zipRepository.js`)
+- A dedicated `Collaborator` model, if repository membership outgrows a simple array on `Repository`
+- Centralized error-handling middleware (`errorMiddleware.js`)
+- Activity logs, version history, and repository snapshots
