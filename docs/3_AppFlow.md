@@ -136,7 +136,7 @@ sequenceDiagram
     participant UI as WorkspacePage
     participant API as fileController / folderController
     participant DB as MongoDB
-    participant FS as file.socket.js / folder.socket.js
+    participant IO as getIO() — Socket.IO instance
     participant Room as repo:&lt;id&gt; room
 
     U->>UI: create/rename/delete a file or folder
@@ -144,12 +144,14 @@ sequenceDiagram
     API->>API: verify requester is owner or collaborator
     API->>DB: persist change
     DB-->>API: saved document
-    API-->>UI: 200/201 response
-    API->>FS: trigger broadcast (file:created / file:renamed / file:deleted, etc.)
-    FS-->>Room: emit event to repo:<id>
+    API->>IO: getIO().to(repo:<id>).emit(file:created / file:renamed / file:deleted, ...)
+    IO-->>Room: event delivered to repo:<id>
     Room-->>UI: other clients' useSocket receives event
+    API-->>UI: 200/201 response
     UI->>UI: reloadTree() — file tree refreshes without a manual refresh
 ```
+
+The broadcast is fired directly from the controller after persistence, not from a separate socket handler — `handlers/file.socket.js` and `handlers/folder.socket.js` are unused placeholders in the current implementation.
 
 ---
 

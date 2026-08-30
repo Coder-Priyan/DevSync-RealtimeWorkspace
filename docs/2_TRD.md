@@ -69,7 +69,7 @@ graph TD
 | `workspace.socket.js` | Owns room membership — joining/leaving a repository's `repo:<id>` room, and dispatching to the other handlers on connect |
 | `presence.socket.js` | In-memory store of who is connected to which repository room; broadcasts on every join/leave |
 | `editor.socket.js` | Validates and relays live code changes to everyone else with the same file open |
-| `file.socket.js` / `folder.socket.js` | Broadcast file/folder create, rename, and delete events to a repository's room |
+| `fileController` / `folderController` | Also broadcast file/folder create, rename, and delete events to a repository's room, via `getIO()`, immediately after persisting the change |
 
 ---
 
@@ -82,6 +82,8 @@ graph TD
 **`editor.socket.js`** checks that an incoming `editor:change` event's `repositoryId` matches the socket's actual current room (`socket.data.currentRepository`) before broadcasting — this prevents a stale or spoofed client from injecting changes into a room it isn't actually part of. Changes are relayed with `socket.broadcast.to(room)`, so the sender never receives its own echo.
 
 **`repositoryController`** stores collaborators as an array of `User` references directly on the `Repository` document, rather than through a separate join model — access control for a repository is a membership check against this array plus the `owner` field.
+
+**`fileController` / `folderController`** persist changes via REST and then call `getIO()` directly to emit `file:*`/`folder:*` events to the repository's room — real-time file-tree sync is driven from the controller layer, not from a dedicated socket handler. `handlers/file.socket.js` and `handlers/folder.socket.js` exist as placeholder files (`registerFileHandlers`/`registerFolderHandlers` with empty bodies) from an earlier planned design and are not currently used.
 
 **`invitation.controller`** together with the `Invitation` model implements the actual access-granting flow: an invitation is created with `pending` status, optionally has a TTL-indexed `expiresAt`, and moves to `accepted` or `rejected` when the invited user responds. MongoDB's TTL index automatically removes expired invitation documents without a manual cleanup job.
 
@@ -228,6 +230,7 @@ The current build runs as a single Node.js process handling both the REST API an
 
 - **No centralized error handling** — `middleware/errorMiddleware.js` exists as a file but is currently empty; error responses are shaped per-controller.
 - **No dedicated Collaborator model** — collaborators are stored as a `User` reference array directly on `Repository`; `models/Collaborator.js` and `controllers/collaboratorController.js` are present as empty stubs, not currently used.
+- **No dedicated file/folder socket handlers** — `handlers/file.socket.js` and `handlers/folder.socket.js` are empty placeholders; real-time file/folder broadcasts are emitted directly from `fileController`/`folderController` instead.
 - **No repository export** — `services/exportService.js` and `utils/zipRepository.js` are present as empty stubs; ZIP export is not yet functional.
 - **In-memory presence only** — presence state is not persisted and does not survive a server restart (by design, see [Real-Time Design](#real-time-design)).
 - **Single-instance only** — no multi-node/horizontal scaling support in the current architecture.
