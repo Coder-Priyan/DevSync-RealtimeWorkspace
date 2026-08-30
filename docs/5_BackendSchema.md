@@ -1,137 +1,153 @@
-# Backend Schema Design
+# Backend Schema
 
-## Project Name
-DevSync
+**DevSync — Real-Time Collaborative Development Workspace**
 
-## Database
-MongoDB (via Mongoose)
+*Documents the core Mongoose data models, why each exists, and how they relate. For real-time behavior built on top of them, see the [TRD](2_TRD.md#real-time-design).*
 
 ---
 
-# 1. Overview
+## Table of Contents
 
-DevSync's data model is built around five collections: `User`, `Repository`, `Folder`, `File`, and `Invitation`. Relationships are modeled with `ObjectId` references rather than embedded documents — files and folders are their own collections referencing a parent `Repository`, not arrays nested inside it. Every schema uses Mongoose's `{ timestamps: true }` for automatic `createdAt`/`updatedAt` tracking.
+- [Storage Model](#storage-model)
+- [User](#user)
+- [Repository](#repository)
+- [Folder](#folder)
+- [File](#file)
+- [Invitation](#invitation)
+- [Presence (In-Memory, Not Persisted)](#presence-in-memory-not-persisted)
+- [Relationships](#relationships)
 
 ---
 
-# 2. User
+## Storage Model
+
+DevSync persists all durable state in MongoDB via Mongoose schemas. One category of state — live presence — is deliberately **not** stored in MongoDB; it lives only in server memory for the lifetime of active socket connections (see [Presence](#presence-in-memory-not-persisted)).
+
+---
+
+## User
 
 ```js
 {
-  username:     String,   required, trimmed
-  email:        String,   required, unique, lowercase, trimmed
-  password:     String,   required (bcrypt hash — never stored in plaintext)
-  profileImage: String,   default: ""
-  createdAt / updatedAt (auto)
+  username:     String,   // required, trimmed
+  email:        String,   // required, unique, lowercase, trimmed
+  password:     String,   // required — bcrypt hash, never plaintext
+  profileImage: String,   // default: ""
+  timestamps:   true,     // createdAt, updatedAt
 }
 ```
 
-**Notes:**
-* `email` carries a unique index — this is the natural lookup key for login and for the invitation system's "find user by email" step.
-* `password` is always a bcrypt hash by the time it reaches the database; hashing happens in the auth controller before `User.create()`.
-* `profileImage` currently defaults to an empty string with no upload pipeline implemented yet — reserved for a future avatar feature.
+**Why it exists**: the identity backing both REST authentication and the Socket.IO handshake. The same `User._id` is embedded in the JWT issued at login and used to resolve `req.user` (REST) and `socket.user` (sockets) on every subsequent request.
 
 ---
 
-# 3. Repository
+## Repository
 
 ```js
 {
-  name:          String,     required, trimmed
-  description:   String,     default: ""
-  owner:         ObjectId,   ref: 'User', required
-  isPublic:      Boolean,    default: true
-  collaborators: [ObjectId], ref: 'User'
-  createdAt / updatedAt (auto)
+  name:          String,                                  // required, trimmed
+  description:   String,                                  // default: ""
+  owner:         ObjectId → User,                          // required
+  isPublic:      Boolean,                                  // default: true
+  collaborators: [ObjectId → User],                        // default: []
+  timestamps:    true,
 }
 ```
 
-**Notes:**
-* `owner` is a single user and is never included in `collaborators` — ownership and collaboration are treated as distinct roles throughout the authorization checks (`isOwner` vs. `isCollaborator`).
-* `collaborators` is a flat array of user references. Access checks across files, folders, and repository endpoints consistently allow an action if the requester is either the `owner` or present in this array.
-* Deleting a repository does not currently cascade-delete its files/folders/invitations at the database level — this is a known gap to close before the export/cleanup feature is finalized (orphaned `File`/`Folder`/`Invitation` documents can currently outlive their parent `Repository`).
+**Why it exists**: the core unit of collaboration in the product. Access control is a direct membership check — a user may act on a repository if they are the `owner` or present in `collaborators` — rather than routed through a separate permissions table. This keeps authorization checks in `repositoryController`, `fileController`, and `folderController` a single array/equality check rather than a join query.
+
+**Note**: a dedicated `Collaborator` model exists in the codebase (`models/Collaborator.js`) but is currently an empty, unused stub — collaborator membership is handled entirely through the `collaborators` array on this model.
 
 ---
 
-# 4. Folder
+## Folder
 
 ```js
 {
-  name:         String,   required, trimmed
-  repository:   ObjectId, ref: 'Repository', required
-  parentFolder: ObjectId, ref: 'Folder', default: null
-  createdBy:    ObjectId, ref: 'User', required
-  createdAt / updatedAt (auto)
+  name:         String,                    // required, trimmed
+  repository:   ObjectId → Repository,      // required
+  parentFolder: ObjectId → Folder,          // default: null — null means root-level
+  createdBy:    ObjectId → User,            // required
+  timestamps:   true,
 }
 ```
 
-**Notes:**
-* `parentFolder: null` represents a top-level folder directly under the repository root — the tree is reconstructed on the frontend by walking `parentFolder` references, there is no materialized path field.
-* Folder creation validates that a provided `parentFolderId` both exists and belongs to the same `repository` as the new folder, preventing cross-repository folder nesting.
+**Why it exists**: folders are self-referential via `parentFolder`, which is what allows an arbitrarily nested file tree per repository without a separate path-string or materialized-path scheme. A `null` `parentFolder` marks a folder as living at the repository root.
 
 ---
 
-# 5. File
+## File
 
 ```js
 {
-  name:       String,   required, trimmed
-  content:    String,   default: ""
-  repository: ObjectId, ref: 'Repository', required
-  createdBy:  ObjectId, ref: 'User', required
-  folder:     ObjectId, ref: 'Folder', default: null
-  createdAt / updatedAt (auto)
+  name:       String,                   // required, trimmed
+  content:    String,                   // default: '' — the actual file text
+  repository: ObjectId → Repository,     // required
+  folder:     ObjectId → Folder,         // default: null — null means root-level
+  createdBy:  ObjectId → User,           // required
+  timestamps: true,
 }
 ```
 
-**Notes:**
-* `content` holds the file's full text and is what the collaborative editor reads/writes — there is no separate content-versioning or diffing at the schema level; the field is simply overwritten on each auto-save.
-* `folder: null` means the file sits at the repository root, mirroring the `Folder` model's convention.
-* This field was originally missing from the schema during early development (files could be created but not correctly associated with a folder) — it has since been added and is a required part of the working schema.
+**Why it exists**: unlike a typical Git-backed system, a `File` document stores its content directly and is the live, single source of truth — there is no separate "committed" version. Real-time edits update this same document's `content` field, so what's persisted is always what every collaborator is currently seeing.
 
 ---
 
-# 6. Invitation
+## Invitation
 
 ```js
 {
-  repository:  ObjectId, ref: 'Repository', required
-  invitedBy:   ObjectId, ref: 'User', required
-  invitedUser: ObjectId, ref: 'User', required
-  status:      String,   enum: ['pending', 'accepted', 'rejected'], default: 'pending'
-  expiresAt:   Date
-  createdAt / updatedAt (auto)
+  repository:   ObjectId → Repository,                 // required
+  invitedBy:    ObjectId → User,                        // required
+  invitedUser:  ObjectId → User,                        // required
+  status:       String,  // "pending" | "accepted" | "rejected", default: "pending"
+  expiresAt:    Date,                                   // optional
+  timestamps:   true,
 }
 ```
 
-**Indexes:**
-1. `{ invitedUser: 1, status: 1 }` — compound index covering the most frequent query, "fetch all pending invitations for a user," without a collection scan.
-2. `{ repository: 1, invitedUser: 1 }` — compound index used to detect an existing pending invitation for the same (repository, user) pair before creating a new one, and to support "list all invitations for a repository."
-3. `{ expiresAt: 1 }` with `expireAfterSeconds: 0` — a **TTL index**: MongoDB automatically deletes an invitation document once its `expiresAt` timestamp is reached. Documents with no `expiresAt` set are unaffected. This removes the need for a manual cleanup cron job.
+**Indexes**:
+- `{ invitedUser: 1, status: 1 }` — serves the most frequent query, "a user's pending invitations."
+- `{ repository: 1, invitedUser: 1 }` — checks for an existing pending invite before creating a duplicate, and serves "all invitations sent for a repository."
+- `{ expiresAt: 1 }` with `expireAfterSeconds: 0` — a MongoDB TTL index that automatically deletes an invitation once `expiresAt` passes, with no manual cleanup job required. Invitations without an `expiresAt` are unaffected.
 
-**Notes:**
-* `expiresAt` is set by the controller at creation time (currently 7 days out), not enforced by a schema default — the field itself is optional so invitations could exist without an expiry if a future product decision removes that constraint.
-* Accepting an invitation pushes `invitedUser` into the target `Repository.collaborators` array and flips `status` to `accepted` — it does not delete the invitation document; accepted/rejected invitations remain as a historical record until their TTL (if any) expires.
+**Why it exists**: separates "has been invited" from "is a collaborator" as an explicit, auditable state machine (`pending → accepted/rejected`), rather than adding a user straight to `Repository.collaborators` on invite. Accepting an invitation is the only path that pushes a user into that array.
 
 ---
 
-# 7. Relationships Summary
+## Presence (In-Memory, Not Persisted)
 
+```js
+// presenceStore — held in server memory, not MongoDB
+{
+  [repositoryId]: Map {
+    [socketId]: { userId, username, socketId, joinedAt }
+  }
+}
 ```
-User ──< owner ──── Repository
-User ──< collaborators[] ──── Repository
-Repository ──< repository ──── Folder
-Repository ──< repository ──── File
-Folder ──< parentFolder ──── Folder (self-referential tree)
-Folder ──< folder ──── File
-Repository ──< repository ──── Invitation
-User ──< invitedBy / invitedUser ──── Invitation
-```
+
+**Why it isn't a Mongoose model**: presence is a property of *live connections*, not durable application state. It resets correctly on every server restart, since every socket disconnects at that same moment. Keying by `socketId` (not `userId`) lets one user with multiple open tabs be tracked individually per tab, while `getPresenceList()` deduplicates by `userId` at read time so they still appear once in what collaborators see.
 
 ---
 
-# 8. Known Schema-Level Gaps (Tracked, Not Blocking)
+## Relationships
 
-* **`backend/src/models/Collaborator.js` exists as an empty file.** It is not used anywhere in the codebase — collaborator relationships are handled entirely through `Repository.collaborators` and the `Invitation` model. This file should either be removed or repurposed if a richer collaborator record (e.g. per-collaborator role/permissions) is introduced later.
-* **No cascade deletes.** Deleting a `Repository` does not currently remove its associated `Folder`, `File`, or `Invitation` documents. This needs to be addressed (either via a pre-remove hook or an explicit cleanup step in `deleteRepository`) before repository deletion is considered production-safe.
-* **No collaborator-level permissions.** Every collaborator currently has full read/write access — there is no owner/editor/viewer distinction. Acceptable for the current product scope, but worth flagging if role-based access is ever requested.
+```mermaid
+erDiagram
+    USER ||--o{ REPOSITORY : owns
+    USER }o--o{ REPOSITORY : "collaborates on"
+    REPOSITORY ||--o{ FOLDER : contains
+    REPOSITORY ||--o{ FILE : contains
+    FOLDER ||--o{ FOLDER : "nests (parentFolder)"
+    FOLDER ||--o{ FILE : contains
+    USER ||--o{ FILE : creates
+    USER ||--o{ FOLDER : creates
+
+    REPOSITORY ||--o{ INVITATION : "has"
+    USER ||--o{ INVITATION : "sends (invitedBy)"
+    USER ||--o{ INVITATION : "receives (invitedUser)"
+
+    REPOSITORY ||--o| PRESENCE_STORE : "tracked in-memory by"
+```
+
+A `Repository` is the hub every other durable model hangs off of — `Folder` and `File` reference it directly, and access is gated by the `owner`/`collaborators` relationship rather than a separate junction collection. `Invitation` is the only model that mediates between two `User` documents and a `Repository` without directly mutating either until accepted. The in-memory presence store is keyed by `repositoryId` but deliberately lives outside this persisted graph entirely.
