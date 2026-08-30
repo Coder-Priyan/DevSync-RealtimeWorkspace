@@ -1,104 +1,227 @@
 # Application Flow
 
-## Project Name
-DevSync
+**DevSync — Real-Time Collaborative Development Workspace**
+
+*Documents the complete request lifecycle through the system. For component-level design, see the [TRD](2_TRD.md).*
 
 ---
 
-# 1. Route Map
+## Table of Contents
 
-| Route | Access | Component | Notes |
-|---|---|---|---|
-| `/` | Any | `RootRedirect` | Redirects to `/dashboard` if authenticated, `/login` otherwise |
-| `/login` | Public only | `LoginPage` | Redirects authenticated users to `/dashboard` |
-| `/register` | Public only | `RegisterPage` | Redirects authenticated users to `/dashboard` |
-| `/dashboard` | Protected | `DashboardPage` | Repository list + creation |
-| `/workspace/:repoId` | Protected | `WorkspacePage` | Live collaborative workspace |
-| `*` | Any | `NotFoundPage` | Catch-all 404 |
-
-All pages are lazy-loaded; `AppRouter.jsx` is the single source of truth for route definitions. "Protected" routes are wrapped in `ProtectedRoute`, which checks `AuthContext` and redirects to `/login` if there's no valid session — with a brief loading screen shown while the session is restored from storage, so an authenticated user never sees a login-page flash on refresh.
+- [HTTP Request Lifecycle](#http-request-lifecycle)
+- [Authentication Flow](#authentication-flow)
+- [Socket Connection & Handshake Flow](#socket-connection--handshake-flow)
+- [Workspace Join Flow](#workspace-join-flow)
+- [Real-Time File/Folder Mutation Flow](#real-time-filefolder-mutation-flow)
+- [Real-Time Collaborative Editing Flow](#real-time-collaborative-editing-flow)
+- [Invitation Flow](#invitation-flow)
+- [Disconnect Flow](#disconnect-flow)
 
 ---
 
-# 2. Authentication Flow
+## HTTP Request Lifecycle
 
-1. **New user** lands on `/register`, submits username/email/password.
-2. Backend hashes the password, creates the `User` document, and returns a success response (registration does **not** auto-login in the current flow).
-3. User is directed to `/login`, submits email/password.
-4. Backend verifies credentials and returns a signed JWT plus basic user info.
-5. Frontend stores the JWT (used both as an Axios bearer token and as the Socket.IO handshake auth token) and updates `AuthContext`.
-6. User is redirected to `/dashboard`.
-7. On every subsequent app load, `AuthContext` restores the session from stored token, verifies it (e.g. via `/api/auth/profile`), and either lands the user on `/dashboard` or bounces them to `/login` if the token is invalid/expired.
+Every REST request follows the same top-level path before diverging into resource-specific logic:
 
----
+```mermaid
+sequenceDiagram
+    participant C as Client (Browser)
+    participant E as Express App
+    participant M as protect Middleware
+    participant Ctrl as Controller
+    participant DB as MongoDB
 
-# 3. Dashboard Flow
+    C->>E: HTTP request + Authorization: Bearer <token>
+    E->>M: verify JWT, load user
+    M->>Ctrl: attach req.user, call next()
+    Ctrl->>DB: query / mutate
+    DB-->>Ctrl: result
+    Ctrl-->>C: JSON response
+```
 
-1. On mount, `useDashboard` fetches the user's repositories: `GET /api/repositories`, which returns every repository where the user is either the `owner` or listed in `collaborators`.
-2. Repositories render as cards (`RepoCard`) inside `RepoList`.
-3. **Create repository**: `CreateRepoModal` collects name/description/visibility → `POST /api/repositories` → new repo appears in the list, owner = current user.
-4. **Open repository**: clicking a card navigates to `/workspace/:repoId`.
-5. **Received invitations**: pending invitations addressed to the logged-in user are fetched (`GET /api/invitations/received`) and surfaced so the user can accept/reject them without needing to already be inside a workspace.
-
----
-
-# 4. Entering a Workspace
-
-1. Navigating to `/workspace/:repoId` mounts `WorkspacePage`.
-2. `useWorkspace` loads repository metadata (`GET /api/repositories/:id`), while `useFileTree` loads the folder/file structure (`GET /api/folders/:repositoryId`, `GET /api/files/:repositoryId`).
-3. `useSocket(repoId, reloadTree)` establishes the Socket.IO connection (JWT handshake), and once connected, emits `workspace:join` with the `repositoryId`.
-4. Server verifies the repository exists, moves the socket into `repo:<repositoryId>` (leaving any previous room first), registers presence, and responds with `workspace:joined` containing the current online-user list.
-5. `WorkspacePage` renders `Sidebar` (file explorer), `EditorPane`/`TabBar` (open files), `CollabPane` (presence + invitations), and `StatusBar`.
+Public routes (`/register`, `/login`) skip the `protect` middleware; every other route requires a valid JWT.
 
 ---
 
-# 5. File & Folder Operations
+## Authentication Flow
 
-1. User right-clicks in `FileTree` or uses the toolbar to create/rename/delete a file or folder.
-2. The corresponding service call fires (`file.service.js` / `folder.service.js`) → REST endpoint (`POST/PUT/DELETE /api/files/...` or `/api/folders/...`).
-3. On success, the controller persists the change in MongoDB **and** emits the matching socket event (`file:created`, `file:renamed`, `file:deleted`, `folder:created`, `folder:renamed`, `folder:deleted`) to the `repo:<repositoryId>` room.
-4. Every other connected collaborator's `useSocket` listener catches the event and calls `reloadTree()`, so their `FileTree` reflects the change without a manual refresh.
-5. The user who performed the action updates their own tree from the direct REST response — they do not wait for their own socket broadcast.
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as LoginForm (React)
+    participant H as useLogin hook
+    participant API as authController
+    participant DB as MongoDB
 
----
+    U->>UI: enter email + password
+    UI->>H: submit
+    H->>H: client-side validation
+    H->>API: POST /api/auth/login
+    API->>DB: User.findOne({ email })
+    API->>API: bcrypt.compare(password, user.password)
+    API-->>H: { token, user }
+    H->>H: AuthContext.login(token, user) — saves to localStorage
+    H->>UI: navigate to dashboard
+```
 
-# 6. Opening a File & Collaborative Editing
-
-1. Clicking a file in `FileTree` opens it as a tab (`useTabs`) and calls `useEditor.loadFile()`, which fetches its content (`GET /api/files/single/:fileId`) if not already cached.
-2. The socket emits `editor:join` with `{ repositoryId, fileId }` so the server knows this socket has the file open (used for validation, not currently for granular per-file rooms).
-3. **Local typing**: every keystroke calls `setContent()`, which (a) updates local state immediately for a responsive feel, (b) emits `editor:change` over the socket instantly — no debounce, and (c) schedules a debounced (~800ms) `PUT /api/files/:fileId` call that persists the content and flips the status indicator from "saving" to "saved".
-4. **Receiving a remote edit**: the server rebroadcasts the change as `editor:update` to every other socket in the room. If the receiving user has that same file open as their active tab, `applyRemoteUpdate()` sets the `ignoreRemoteChange` guard, pushes the new content into the Monaco instance, restores the cursor position, then clears the guard. If the file isn't the user's active tab, the content is cached silently so it's up to date if they switch to it later.
-
----
-
-# 7. Presence Flow
-
-1. On `workspace:join`, the server adds the socket to an in-memory presence map for that repository and broadcasts `presence:update` (deduplicated by user, so a user with two tabs open still shows once) to everyone in the room, including the joiner.
-2. `CollabPane`'s `PresenceList` renders the online-user list live via `usePresence`.
-3. On disconnect or `workspace:leave`, the server removes the socket from the presence map and re-broadcasts `presence:update` so everyone's list updates immediately.
+On failure, `useLogin` maps the HTTP status to a specific message (invalid credentials, rate-limited, unreachable server) rather than a generic error.
 
 ---
 
-# 8. Invitation Flow
+## Socket Connection & Handshake Flow
 
-1. From inside a workspace (or dashboard), the repository owner opens `InviteForm` and submits a collaborator's email.
-2. `POST /api/invitations` runs a sequence of checks: repository exists, requester is the owner, the invited email belongs to a real user, the owner isn't inviting themself, the user isn't already a collaborator, and no pending invitation already exists for that pair — then creates an `Invitation` document with `status: pending` and a 7-day expiry.
-3. The invited user, on their own dashboard, sees the invite via `GET /api/invitations/received` (rendered in `ReceivedInvitations`).
-4. **Accept**: `PUT /api/invitations/:id/accept` re-validates ownership of the action, pending status, and non-expiry, then adds the invited user to the repository's `collaborators` array and marks the invitation `accepted`.
-5. **Reject**: `PUT /api/invitations/:id/reject` marks the invitation `rejected` with the same guard checks, without touching the repository.
-6. Once accepted, the new collaborator can open `/workspace/:repoId` like any other collaborator — the authorization check (`owner` or in `collaborators`) now passes for them across every file/folder/repository endpoint.
+A socket is only created when a user enters a repository workspace — not on login, registration, or the dashboard.
+
+```mermaid
+sequenceDiagram
+    participant UI as WorkspacePage
+    participant Hook as useSocket
+    participant Lib as lib/socket.js
+    participant MW as socketAuthMiddleware
+    participant IO as Socket.IO Server
+
+    UI->>Hook: mount with repoId
+    Hook->>Lib: connectSocket()
+    Lib->>IO: io.connect({ auth: { token } })
+    IO->>MW: verify JWT before "connection"
+    MW->>MW: jwt.verify() + User.findById()
+    alt token valid
+        MW-->>IO: next() — attach socket.user
+        IO-->>Lib: "connect" event
+        Lib-->>Hook: connected
+        Hook->>IO: emit workspace:join { repositoryId }
+    else token invalid/missing
+        MW-->>IO: next(Error)
+        IO-->>Lib: "connect_error"
+    end
+```
 
 ---
 
-# 9. Leaving a Workspace / Disconnection
+## Workspace Join Flow
 
-1. Navigating away, closing the tab, or losing connection triggers socket `disconnect`.
-2. The server reads `socket.data.currentRepository`, removes the socket from that repository's presence map, and broadcasts the updated presence list to remaining collaborators.
-3. No data is lost on disconnect: anything already auto-saved via the debounced REST call is persisted; only the in-flight, not-yet-debounced keystroke buffer for that session could be lost, matching the "sockets are not the source of truth" architecture rule.
+```mermaid
+sequenceDiagram
+    participant Hook as useSocket (client)
+    participant WS as workspace.socket.js
+    participant Repo as Repository model
+    participant PR as presence.socket.js
+    participant Room as repo:&lt;id&gt; room
+
+    Hook->>WS: workspace:join { repositoryId }
+    WS->>Repo: Repository.findById(repositoryId)
+    alt repository exists
+        WS->>Room: socket.join(repo:<id>)
+        WS->>WS: socket.data.currentRepository = repositoryId
+        WS->>PR: onJoinRoom(repositoryId)
+        PR->>PR: addToPresence() + broadcastPresence()
+        PR-->>Room: presence:update { users, count }
+        WS-->>Hook: workspace:joined { repositoryId, users }
+    else repository not found
+        WS-->>Hook: error { message: "Repository not found." }
+    end
+```
+
+If the socket was already in a different repository room, `workspace.socket.js` leaves that room and fires `onLeaveRoom` before joining the new one, so a user is never counted as present in two repositories at once.
 
 ---
 
-# 10. Export Flow (In Progress)
+## Real-Time File/Folder Mutation Flow
 
-1. `ExportButton` in the workspace toolbar is intended to trigger a repository ZIP download.
-2. The backend export path (`services/exportService.js` and `utils/zipRepository.js`) is scaffolded but not yet implemented — this is the next major piece of committed scope after the invitation system.
+Applies to creating, renaming, or deleting a file or folder. File and folder operations are persisted through REST, then broadcast over the socket layer.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as WorkspacePage
+    participant API as fileController / folderController
+    participant DB as MongoDB
+    participant FS as file.socket.js / folder.socket.js
+    participant Room as repo:&lt;id&gt; room
+
+    U->>UI: create/rename/delete a file or folder
+    UI->>API: POST/PUT/DELETE /api/files or /api/folders
+    API->>API: verify requester is owner or collaborator
+    API->>DB: persist change
+    DB-->>API: saved document
+    API-->>UI: 200/201 response
+    API->>FS: trigger broadcast (file:created / file:renamed / file:deleted, etc.)
+    FS-->>Room: emit event to repo:<id>
+    Room-->>UI: other clients' useSocket receives event
+    UI->>UI: reloadTree() — file tree refreshes without a manual refresh
+```
+
+---
+
+## Real-Time Collaborative Editing Flow
+
+Applies to keystrokes inside the Monaco editor.
+
+```mermaid
+sequenceDiagram
+    participant A as User A (typing)
+    participant Ed as useEditor (Client A)
+    participant Sock as editor.socket.js
+    participant Room as repo:&lt;id&gt; room
+    participant B as User B (viewing same file)
+
+    A->>Ed: types in Monaco editor
+    Ed->>Sock: editor:change { repositoryId, fileId, content }
+    Sock->>Sock: verify socket.data.currentRepository === repositoryId
+    alt valid room membership
+        Sock->>Room: broadcast editor:update { fileId, content } (excludes sender)
+        Room-->>B: editor:update received
+        B->>B: applyRemoteUpdate(fileId, content, activeTab)
+    else room mismatch
+        Sock->>Sock: reject silently, log warning
+    end
+```
+
+`editor:join` is emitted first when a file is opened, recording `socket.data.activeFile` so future changes can be attributed and validated per file.
+
+---
+
+## Invitation Flow
+
+```mermaid
+sequenceDiagram
+    participant O as Repository Owner
+    participant API as invitation.controller
+    participant DB as MongoDB (Invitation)
+    participant R as Invited User
+
+    O->>API: POST /api/invitations { repositoryId, invitedUserId }
+    API->>DB: Invitation.create({ status: "pending", expiresAt })
+    R->>API: GET /api/invitations/received
+    API->>DB: find({ invitedUser: R, status: "pending" })
+    DB-->>API: pending invitations
+    API-->>R: invitation list (ReceivedInvitations component)
+    R->>API: PUT /api/invitations/:id/accept
+    API->>DB: update Invitation.status = "accepted"
+    API->>DB: Repository.collaborators.push(R)
+    API-->>R: repository now accessible
+```
+
+Invitations left unanswered are automatically removed once `expiresAt` passes, via MongoDB's TTL index on the `Invitation` model — no manual cleanup job is required.
+
+---
+
+## Disconnect Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant IO as Socket.IO Server
+    participant WS as workspace.socket.js
+    participant PR as presence.socket.js
+    participant Room as repo:&lt;id&gt; room
+
+    Client--)IO: connection drops (tab close, network loss, navigation)
+    IO->>WS: "disconnect" event
+    WS->>PR: onLeaveRoom(currentRepository)
+    PR->>PR: removeFromPresence(repositoryId, socketId)
+    PR-->>Room: presence:update { users, count }
+    WS->>WS: clear socket.data.currentRepository / activeFile
+```
+
+Presence is deduplicated by `userId`, so if the same user still has another tab open in the same repository, they remain in the online list — only the specific `socketId` that disconnected is removed.
