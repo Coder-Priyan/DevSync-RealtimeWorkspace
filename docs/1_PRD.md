@@ -1,168 +1,140 @@
-# Product Requirements Document (PRD)
+# Product Requirements Document
 
-## Project Name
-DevSync
+**DevSync — Real-Time Collaborative Development Workspace**
 
-## Product Category
-Real-Time Collaborative Repository Workspace
+*Defines the problem, objectives, and scope for the product. For technical architecture, see the [TRD](2_TRD.md).*
 
 ---
 
-# 1. Introduction
+## Table of Contents
 
-Modern software development is highly collaborative. Whether it is a college project, a hackathon submission, or a small team-based application, multiple developers are often required to work on the same codebase at the same time.
-
-Traditional version control systems (like Git) are built around asynchronous collaboration — commit, push, pull. They are excellent at preserving history but were never designed for two people to see each other typing in the same file at the same moment.
-
-DevSync fills that gap. It is a browser-based workspace where a repository is not a folder on someone's laptop, but a **shared live environment**: one canonical copy of the project, held on the server, that every collaborator edits directly and simultaneously.
-
----
-
-# 2. Problem Statement
-
-Small teams and student developers working on a shared codebase commonly run into:
-
-* Duplicate project copies across teammates' machines
-* Manual file sharing over chat apps before a proper Git setup exists
-* "Merge conflict" confusion for beginners unfamiliar with branching
-* No visibility into who is working on what, right now
-* Delayed visibility of changes — a teammate's edit is invisible until they push and you pull
-
-Git-based platforms solve version history well, but they add a layer of ceremony (branch, commit, push, pull, resolve conflicts) that is unnecessary overhead when a team just wants to **see the same file update live** while pair-programming or working through a hackathon deadline.
+- [Problem Statement](#problem-statement)
+- [Objectives](#objectives)
+- [Target Users](#target-users)
+- [Functional Requirements](#functional-requirements)
+- [Non-Functional Requirements](#non-functional-requirements)
+- [Scope](#scope)
+- [Constraints](#constraints)
+- [Future Scope](#future-scope)
+- [Success Metrics](#success-metrics)
 
 ---
 
-# 3. Product Vision
+## Problem Statement
 
-DevSync's vision is a workspace where a project exists as one shared live entity rather than a set of local copies stitched together at commit time.
+Collaborative software development is typically built around *asynchronous* workflows — commit, push, pull, merge. Git-based platforms are excellent at preserving history, but they were never designed for two people to see each other editing the same file at the same moment.
 
-Every collaborator on a repository should be able to:
+This creates friction for small teams and student developers, who commonly deal with:
 
-* Open the same repository and see the same file tree
-* Edit the same file at the same time as a teammate and see their keystrokes appear live
-* See who else is currently online in that repository
-* Trust that whatever they see is the current, persisted state — not a stale local copy
+- Duplicate project copies across teammates' machines
+- Manual file sharing over chat apps before a proper Git setup exists
+- No visibility into who is working on what, right now
+- Delayed visibility of changes — a teammate's edit is invisible until they push and you pull
 
----
+There is no lightweight, self-contained workspace that lets a small team treat a repository as one shared live entity — edited directly and simultaneously — rather than a set of local copies reconciled at commit time.
 
-# 4. Proposed Solution
-
-DevSync organizes everything around the **repository** as the unit of collaboration. A repository owns a tree of folders and files, an owner, and a list of collaborators.
-
-When a user is inside a repository's workspace:
-
-* File and folder operations (create/rename/delete) are saved through the REST API and then broadcast to everyone else currently viewing that repository, so their file tree updates without a manual refresh.
-* Code changes inside the Monaco-based editor are streamed over a Socket.IO connection to every other collaborator with that file open, in addition to being auto-saved to the database on a short debounce.
-* Presence (who is online, in which repository) is tracked in memory on the server and broadcast whenever someone joins or leaves.
-
-Access to a repository is controlled through an **invitation flow**: an owner sends an invite by email, the invited user sees it in their pending-invitations list, and accepting it adds them as a collaborator with full read/write access to that repository's files and folders.
-
-Repositories are also intended to be exportable as a ZIP archive so a collaborator can pull the current state down and run it locally — this is part of the product's initial scope, currently in progress.
+DevSync addresses this gap directly.
 
 ---
 
-# 5. Target Users
+## Objectives
 
-### College Students
-Students working on academic assignments, minor/major projects, and final-year submissions who need a lightweight way to co-develop without setting up Git branching workflows.
-
-### Hackathon Teams
-Teams with a few hours to a couple of days who need to divide work across a shared codebase and see updates instantly instead of coordinating pushes.
-
-### Beginner Developers
-Developers still building comfort with collaborative workflows, for whom "everyone edits the same live file" is a gentler mental model than distributed version control.
-
-### Small Development Teams
-Teams that want real-time pair-programming style collaboration without configuring a self-hosted Git server or paying for enterprise tooling.
+| Objective | Description |
+|---|---|
+| Live Synchronization | Two or more collaborators must be able to edit the same file at the same time and see each other's changes without refreshing |
+| Access Control | Repository access must be explicitly granted through an invitation flow, not open sharing |
+| Presence Visibility | Every collaborator must be able to see who else is currently online in a repository, in real time |
+| Persistence | Every repository, file, folder, and edit must survive page reloads and server restarts |
+| Low Ceremony | Achieve real-time collaboration without requiring branch/commit/push/pull mechanics |
 
 ---
 
-# 6. Product Objectives
+## Target Users
 
-* Let two or more people edit the same file at the same time and see each other's changes without refreshing.
-* Remove the need to manually share project files or zip archives mid-development.
-* Give every collaborator visibility into who else is active in the repository right now.
-* Provide a controlled way to grant repository access (invite → accept) instead of open sharing.
-* Persist every change so the repository state survives page reloads and server restarts.
-* Allow a finished or in-progress repository to be exported for local use.
-
----
-
-# 7. Core Functionalities
-
-### User Authentication
-Email/password registration and login, with JWT-based session persistence used for both REST calls and the Socket.IO connection.
-
-### Repository Management
-Create, list, view, rename/update, and delete repositories from a central dashboard. Repositories can be marked public or private.
-
-### Collaborator & Invitation Management
-Repository owners can send an email-based invitation to a user. The invited user sees pending invitations and can accept or reject them. Accepting adds them to the repository's collaborator list with edit access. Invitations expire automatically after 7 days.
-
-### File & Folder Management
-Collaborators can create, rename, and delete files and nested folders inside a repository. These operations persist through the REST API and are broadcast live to everyone else viewing the same repository.
-
-### Real-Time Collaborative Editing
-The in-browser code editor (Monaco) broadcasts every keystroke over Socket.IO to other collaborators who have the same file open, while the underlying content is auto-saved to MongoDB on a debounce so nothing is lost.
-
-### Presence Awareness
-Every repository workspace shows a live list of who is currently online in that repository, updated the moment someone joins or disconnects.
-
-### Repository Persistence
-All repository, folder, file, and user data is stored in MongoDB and survives sessions and restarts.
-
-### Repository Export
-Repositories can be downloaded as a ZIP archive for local development — this capability is part of the product's committed scope and is currently being built out.
+| User | Interest |
+|---|---|
+| College students | A lightweight way to co-develop assignments and projects without setting up Git branching workflows |
+| Hackathon teams | Dividing work across a shared codebase and seeing updates instantly instead of coordinating pushes under time pressure |
+| Beginner developers | A gentler collaboration model ("everyone edits the same live file") than distributed version control |
+| Small development teams | Real-time, pair-programming-style collaboration without a self-hosted Git server or enterprise tooling |
 
 ---
 
-# 8. Product Scope
+## Functional Requirements
 
-**Included in initial release:**
-
-* User authentication (register/login, JWT sessions)
-* Repository management (CRUD)
-* Invitation-based collaborator management
-* File and folder management
-* Real-time collaborative code editing
-* Presence indicators
-* Repository export as ZIP
-
-**Excluded from initial release** (explicitly deferred):
-
-* Built-in code execution / sandboxed running of the project
-* Git-style version history or commit snapshots
-* AI-assisted development features
-* Repository analytics/activity logs
-
-These are candidates for future releases, not gaps in the current plan.
+| ID | Requirement |
+|---|---|
+| FR-1 | System shall support user registration and login via email/password, issuing a JWT session used for both REST calls and the Socket.IO connection |
+| FR-2 | System shall support full CRUD operations on repositories, files, and folders via REST |
+| FR-3 | System shall broadcast file and folder create/rename/delete operations in real time to every collaborator viewing the same repository |
+| FR-4 | System shall broadcast code changes made in the in-browser editor to every other collaborator with that file open, over Socket.IO |
+| FR-5 | System shall re-authenticate every socket connection against the same JWT used by the REST API before allowing it to join a repository room |
+| FR-6 | System shall track and broadcast live presence (who is online) per repository, deduplicated per user across multiple open tabs |
+| FR-7 | System shall support sending, receiving, accepting, and rejecting collaborator invitations to a repository |
+| FR-8 | System shall persist all repository, file, folder, user, and invitation data in MongoDB |
+| FR-9 | System shall support exporting a repository as a downloadable ZIP archive |
 
 ---
 
-# 9. Success Metrics
+## Non-Functional Requirements
 
-The product is successful if a team can:
-
-* Register, create a repository, and invite a teammate without leaving the app.
-* Have two browser sessions open the same file and see each other's edits appear within roughly a second, without refreshing.
-* See an accurate, live online/offline presence list for a repository.
-* Reload the page or restart the server and find the repository state unchanged.
-* Export a repository as a ZIP and run it locally.
-
----
-
-# 10. Future Direction
-
-Planned long-term extensions, out of scope for the current build:
-
-* Activity logs / audit trail of who changed what and when
-* Version history and repository snapshots
-* Built-in project execution inside the browser
-* AI-assisted coding features (chat-based help, inline suggestions)
-* Repository analytics (contribution breakdowns, activity heatmaps)
+| ID | Requirement |
+|---|---|
+| NFR-1 | Real-time propagation of an edit to other collaborators should occur within roughly one second under normal network conditions |
+| NFR-2 | Socket connections must not be established outside a workspace (e.g. during login/registration/dashboard), to avoid unnecessary open connections |
+| NFR-3 | Presence state does not need to survive a server restart — it is derived from live connections and is correct to reset with them |
+| NFR-4 | Repository, file, and folder state must remain consistent and durable across page reloads and server restarts |
+| NFR-5 | Socket-level actions (editing, presence) must be scoped to a single repository's room and never leak to a client viewing a different repository |
 
 ---
 
-# Product Summary
+## Scope
 
-DevSync is a real-time collaborative repository workspace built to remove the friction of shared development for small teams and students. By combining repository and invitation-based access management with a live, socket-driven editing layer, it lets multiple developers work inside the same project simultaneously — without manual file sharing, without Git ceremony, and without losing track of who is working on what.
+**In scope**
+
+- Email/password authentication with JWT sessions
+- Repository management (create, read, update, delete)
+- File and folder management with real-time tree sync
+- Real-time collaborative code editing via Socket.IO
+- Live presence indicators per repository
+- Invitation-based collaborator access (send/accept/reject)
+- Repository persistence in MongoDB
+- Repository export as ZIP *(in progress — see [Feature Status](../README.md#feature-status))*
+
+**Out of scope**
+
+- Built-in code execution / sandboxed running of the project
+- Git-style version history or commit snapshots
+- AI-assisted development features
+- Repository analytics or activity/audit logs
+
+---
+
+## Constraints
+
+- Presence state is held in-memory on the server, not in the database — it is intentionally not durable across restarts
+- Real-time sync depends on an active Socket.IO connection; there is no offline-edit/merge-on-reconnect model
+- A single server instance handles both the REST API and the Socket.IO layer — no distributed/multi-node scaling in the current build
+- Editor auto-save and broadcast both depend on a live socket; a dropped connection pauses both until it reconnects
+
+---
+
+## Future Scope
+
+- Activity logs / audit trail of who changed what and when
+- Version history and repository snapshots
+- Built-in project execution inside the browser
+- AI-assisted coding features (chat-based help, inline suggestions)
+- Repository analytics (contribution breakdowns, activity heatmaps)
+
+---
+
+## Success Metrics
+
+| Metric | Definition of Success |
+|---|---|
+| Live edit propagation | Two browser sessions with the same file open see each other's edits appear within roughly a second, without refreshing |
+| Access control correctness | A user only gains repository access after sending and accepting an invitation — never through open sharing |
+| Presence accuracy | The online-users list for a repository reflects exactly who is currently connected, deduplicated across multiple tabs |
+| State durability | Reloading the page or restarting the server leaves repository, file, and folder state unchanged |
+| End-to-end workflow | A team can register, create a repository, invite a teammate, and collaboratively edit a file without leaving the app |
