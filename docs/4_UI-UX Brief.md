@@ -1,120 +1,116 @@
 # UI/UX Design Brief
 
-## Project Name
-DevSync
+**DevSync — Real-Time Collaborative Development Workspace**
+
+*Documents interface design decisions and rationale. For system architecture, see the [TRD](2_TRD.md).*
 
 ---
 
-# 1. Design Philosophy
+## Table of Contents
 
-DevSync's visual language borrows deliberately from developer tools its users already live in daily — the aesthetic is dark, IDE-like, and quiet, so the interface disappears and the code/collaboration stays the focus. Nothing about the UI should compete with the Monaco editor for attention.
-
-Core principles:
-* **Dark-first**: there is no light theme in scope — the entire app is designed against a single dark palette.
-* **Developer-familiar**: layout patterns (sidebar file tree, tabbed editor, status bar) mirror VS Code so the tool feels immediately usable with zero onboarding.
-* **Quiet chrome, loud content**: navigation and surfaces use muted, low-contrast tones; accent color is reserved for actionable/interactive elements only.
+- [Design Philosophy](#design-philosophy)
+- [Visual Language](#visual-language)
+- [Layout](#layout)
+- [User Journey](#user-journey)
+- [Real-Time Feedback Design](#real-time-feedback-design)
+- [Accessibility](#accessibility)
+- [Future UI Improvements](#future-ui-improvements)
 
 ---
 
-# 2. Design Tokens
+## Design Philosophy
 
-Defined once via Tailwind v4's `@theme` block and reused everywhere — no raw hex codes elsewhere in the codebase.
+The interface is designed around one principle: **feel like the editor developers already use, not like a generic web app wrapped around one.** Since the product's core value is real-time collaboration inside code, the workspace deliberately mirrors a VS Code–style layout — file explorer on the left, tabbed editor in the center, collaboration context on the right — so the collaborative layer sits on top of a mental model developers already have, instead of asking them to learn a new one.
+
+Outside the workspace (auth, dashboard), the interface follows a calmer, standard dark-dashboard pattern — the density and editor-like chrome are reserved for the workspace itself, where they earn their place.
+
+---
+
+## Visual Language
+
+DevSync uses a dark, developer-tool color palette consistent across every screen:
 
 | Token | Value | Usage |
 |---|---|---|
-| `ds-base` | `#0D1117` | App background (matches GitHub dark base) |
-| `ds-surface` | `#161B22` | Panels, cards, sidebar background |
-| `ds-elevated` | `#21262D` | Modals, dropdowns, hovered rows |
-| `ds-border` | `#30363D` | All hairline borders/dividers |
-| `ds-text` | `#E6EDF3` | Primary text |
-| `ds-text-muted` | `#8B949E` | Secondary text, labels |
-| `ds-text-faint` | `#484F58` | Placeholder/disabled text |
-| `ds-accent` | `#7C5CFC` | Primary actions, links, active states |
-| `ds-accent-hover` | `#6B4EE6` | Hover state for accent elements |
-| `ds-danger` | `#F85149` | Destructive actions, error states |
-| `ds-success` | `#3FB950` | Saved/online/success indicators |
-| `ds-warning` | `#D29922` | Warnings, expiring invitations |
-| `ds-info` | `#58A6FF` | Informational badges |
+| Background (base) | `#0D1117` | App and editor background |
+| Background (panel) | `#161B22` | Sidebars, cards, navbars |
+| Border | `#30363D` | Panel dividers, card outlines |
+| Text (primary) | `#E6EDF3` | Headings, primary content |
+| Text (muted) | `#8B949E` / `#484F58` | Secondary labels, placeholders |
+| Accent | `#7C5CFC` | Primary actions, active states, focus rings |
+| Error | `#F85149` | Error states, destructive actions |
 
-### Typography
-* **UI font**: Inter (weights 300–700)
-* **Code font**: JetBrains Mono (with italics for comments), used in the Monaco editor and anywhere file content or code-like values are shown
-* **Base size**: 13px, line-height 1.5 — deliberately compact to match dense developer-tool UIs rather than a marketing-site's larger type scale
+This palette is intentionally close to familiar code-editor themes, reinforcing that DevSync is a place to *work*, not a marketing surface.
 
 ---
 
-# 3. Layout Structure
+## Layout
 
-### App Shell
-`AppShell` is the persistent frame for all authenticated pages, composed of:
-* `Navbar` — top bar: app identity, user menu
-* `Sidebar` — left rail: repository file tree (workspace) or repo list (dashboard context)
-* Main content region — page-specific
-* `StatusBar` — bottom strip: connection state, save status, active file info
+### Dashboard
+| Region | Contents |
+|---|---|
+| Header | Branding, user context, "Create Repository" action |
+| Main grid | Repository cards (name, description, collaborator count, last updated) |
+| Empty state | Shown when a user has no repositories yet, with a direct call to action |
 
-### Dashboard Layout
-* `DashboardHeader` — page title + "new repository" entry point
-* `RepoList` → grid/list of `RepoCard`s, each showing name, description, visibility badge, and last-updated
-* Empty state (`EmptyState`) when the user has no repositories yet, with a clear call-to-action to create one
+### Workspace
+| Region | Contents |
+|---|---|
+| Top bar | Repository name, live sync status, online-collaborator count |
+| Left panel | File explorer — tree view with inline create/rename, right-click context menu |
+| Center panel | Tabbed Monaco editor — open files as tabs, active file rendered below |
+| Right panel | Presence list (who's online), invite form, received invitations |
+| Status bar | Online count, active file name, app identity |
 
-### Workspace Layout
-Three-pane IDE-style layout:
-1. **Left — File Explorer**: `FileTree` built from `TreeNode` recursion, with `FileContextMenu` for create/rename/delete actions on right-click
-2. **Center — Editor**: `WorkspaceNavbar` (repo name, `BreadcrumbNav`, `ExportButton`) above `TabBar` (open files) above `EditorPane` (Monaco instance); `EditorPlaceHolder` shown when no file is open
-3. **Right — Collaboration Pane**: `PresenceList` (who's online, via `UserPresenceRow`), `InviteForm`, and `ReceivedInvitations`
-
-`StatusBar` at the very bottom reflects live socket connection state and the editor's save status (`saving` / `saved` / `error`), giving the user constant, low-effort confidence that their work is persisted.
+The three-panel workspace layout stays fixed at 100vh with independently scrolling regions, so the editor never gets pushed off-screen by a long file tree or a long collaborator list.
 
 ---
 
-# 4. Component Inventory
+## User Journey
 
-### UI primitives (`components/ui`)
-* `Button` — single component handling all button variants (primary/accent, secondary, danger, ghost) rather than one-off styled buttons per feature
-* `Input` — shared text input with consistent focus/error states
-* `Modal` — shared modal shell used by `CreateRepoModal` and any future dialogs
+```mermaid
+flowchart TD
+    A[Register / Login] --> B[Dashboard]
+    B --> C{Has repositories?}
+    C -->|No| D[Empty state → Create Repository]
+    C -->|Yes| E[Select a repository]
+    D --> E
+    E --> F[Enter Workspace]
+    F --> G[Socket connects, joins repo room]
+    G --> H[See file tree + who else is online]
+    H --> I[Open a file]
+    I --> J[Edit — changes sync live to other viewers]
+    H --> K[Invite a collaborator]
+    K --> L[Invitee sees pending invite → Accept]
+    L --> H
+```
 
-### Shared components (`components/shared`)
-* `AvatarBadge` — user avatar with initials fallback, used in presence lists and collaborator rows
-* `EmptyState` — reusable empty/zero-data illustration + message + CTA
-* `FileIcon` — maps file extension to an appropriate icon
-
-### Feature components
-* Auth: `LoginForm`, `RegisterForm`
-* Dashboard: `CreateRepoModal`, `DashboardHeader`, `RepoCard`, `RepoList`
-* Workspace / Editor: `EditorPane`, `EditorPlaceHolder`, `TabBar`
-* Workspace / File Explorer: `FileTree`, `TreeNode`, `FileContextMenu`
-* Workspace / Toolbar: `BreadcrumbNav`, `ExportButton`, `WorkspaceNavbar`
-* Workspace / Collaboration: `InviteForm`, `PresenceList`, `ReceivedInvitations`, `UserPresenceRow`
-
----
-
-# 5. Key Interaction Patterns
-
-### Presence & Live Status
-Online collaborators render as avatar badges with a live-updating count; the status bar reflects real-time socket connection health so a dropped connection is visible immediately rather than silently failing.
-
-### Save Status Feedback
-The editor status indicator cycles through three states tied directly to the auto-save debounce: `saving` (user is actively typing, change is queued), `saved` (debounced REST write succeeded), `error` (write failed — surfaced rather than swallowed).
-
-### Invitations as a First-Class Surface
-Pending invitations are not buried in settings — `ReceivedInvitations` is a visible panel so a user is never left wondering why they can't see a repo they were told about.
-
-### Context Menus Over Modals for File Ops
-Create/rename/delete for files and folders use inline context menus (`FileContextMenu`) rather than modal dialogs, keeping frequent, low-stakes actions fast — modals are reserved for higher-stakes or multi-field actions (creating a repository, inviting a collaborator).
+A user never has to manually configure a connection or a sync state — entering a workspace is the only action required to start collaborating; the socket connection, room join, and presence broadcast all happen automatically on mount.
 
 ---
 
-# 6. Accessibility & Responsiveness Notes
+## Real-Time Feedback Design
 
-* Sufficient contrast is maintained between `ds-text` / `ds-text-muted` and their respective backgrounds (`ds-base`/`ds-surface`) to remain readable at the compact 13px base size.
-* The three-pane workspace layout is the primary target; collapsing the collaboration pane and/or file explorer on narrower viewports is a known follow-up rather than a solved requirement in the current build.
-* Loading states (`AppLoadingScreen`, route-level `PageLoader`) are intentionally minimal and fast — sessions restore from a stored token in well under a second in normal conditions, so loaders are a safety net, not a feature.
+Because the product's entire value is *live* collaboration, the interface is careful to always make sync state visible rather than assumed:
+
+- **Sync status** in the top bar reflects the actual socket connection state (connected / syncing / error), not just whether the page loaded.
+- **Presence list** updates the moment a collaborator joins or leaves — there is no "refresh to see who's online."
+- **File tree changes** from other collaborators (create/rename/delete) trigger an automatic tree reload, so a user never edits against a stale structure.
+- **Remote edits** in the editor apply directly to the open file, distinguished internally from local typing (via an "ignore remote change" flag) so a collaborator's incoming update never gets mistaken for the user's own keystroke and re-broadcast in a loop.
 
 ---
 
-# 7. Design Non-Goals
+## Accessibility
 
-* No light theme.
-* No custom per-user theming/branding.
-* No animation-heavy transitions — motion is limited to small, functional cues (pulsing loading dots, hover states), consistent with the "quiet chrome" principle.
+- Sync/connection state is paired with both text and color (e.g. "Connected" / "Syncing" / "Error" labels, not a bare colored dot), so state is never conveyed by color alone.
+- Interactive elements (file tree nodes, tabs, context menu items, buttons) support keyboard focus and hover states with sufficient contrast against the dark background.
+- Destructive actions (deleting a file or folder) require an explicit confirmation before executing.
+
+---
+
+## Future UI Improvements
+
+- Breadcrumb navigation above the editor for quickly locating the active file's path within nested folders (`BreadcrumbNav.jsx` is currently an unimplemented placeholder)
+- An explicit export action in the workspace toolbar once ZIP export is implemented (`ExportButton.jsx` is currently an unimplemented placeholder)
+- A dedicated, styled repository list view for the dashboard beyond individual repo cards (`RepoList.jsx` is currently an unimplemented placeholder)
+- Responsive layout for narrower viewports — the current three-panel workspace targets desktop use, consistent with its role as a coding tool
